@@ -12,7 +12,7 @@
     "build:vite": "vite build",
     "build:electron": "npm run build:preload && npm run copy:main",
     "build:preload": "tsc src/main/preload.ts --outDir dist/main --module commonjs --esModuleInterop --skipLibCheck",
-    "copy:main": "node -e \"require('fs').cpSync('src/main/main.js', 'dist/main/main.js')\"",
+    "copy:main": "node -e \"const fs=require('fs');const path=require('path');const dir=path.dirname('dist/main/main.js');if(!fs.existsSync(dir))fs.mkdirSync(dir,{recursive:true});fs.copyFileSync('src/main/main.js','dist/main/main.js')\"",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
