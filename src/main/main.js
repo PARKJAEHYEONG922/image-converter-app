@@ -7,6 +7,9 @@ const http = require('http');
 // 하드웨어 가속 비활성화 (캐시 오류 방지)
 app.disableHardwareAcceleration();
 
+// 캐시 경로 설정 (권한 오류 방지)
+app.setPath('userData', path.join(app.getPath('appData'), 'image-converter-app'));
+
 let mainWindow = null;
 const isDev = process.argv.includes('--dev');
 
