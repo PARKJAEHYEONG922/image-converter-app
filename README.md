@@ -23,6 +23,9 @@ Gemini AI를 활용한 독립형 이미지 생성/편집 Electron 애플리케�
 - Node.js 18.0.0 이상
 - npm 또는 yarn
 - Gemini API 키 ([Google AI Studio](https://aistudio.google.com/app/apikey)에서 발급)
+  - ⚠️ **중요**: 이미지 생성 기능은 **유료 API 키**가 필요합니다
+  - 무료 API 키는 텍스트 생성만 가능하며, Imagen 이미지 생성은 지원하지 않습니다
+  - 이미지 생성 비용: 약 $0.03-0.04/장
 
 ### 설치
 ```bash
