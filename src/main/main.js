@@ -43,9 +43,16 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      devTools: isDev // DevTools only enabled in development mode
+      devTools: isDev, // DevTools only enabled in development mode
+      webSecurity: true,
+      allowRunningInsecureContent: false
     },
     icon: path.join(__dirname, '../../public/icon.png')
+  });
+
+  // Allow external API calls
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders } });
   });
 
   if (isDev) {
