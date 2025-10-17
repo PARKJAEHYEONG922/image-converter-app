@@ -34,7 +34,7 @@ jobs:
       - name: Build for macOS
         if: matrix.os == 'macos-latest'
         run: npm run dist:mac
-        env:
+        # env:
           # macOS 코드 서명 (선택사항)
           # CSC_LINK: ${{ secrets.MAC_CERT }}
           # CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
