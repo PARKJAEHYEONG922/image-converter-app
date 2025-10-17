@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Icon</title>
+</head>
+<body>
+    <canvas id="canvas" width="256" height="256"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Gradient background
+        const gradient = ctx.createLinearGradient(0, 0, 256, 256);
+        gradient.addColorStop(0, '#667eea');
+        gradient.addColorStop(1, '#764ba2');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 256);
+
+        // Icon symbol - Image converter
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 8;
+
+        // Draw image icon
+        ctx.strokeRect(60, 80, 136, 96);
+
+        // Draw mountain inside image
+        ctx.beginPath();
+        ctx.moveTo(80, 150);
+        ctx.lineTo(110, 120);
+        ctx.lineTo(140, 150);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(130, 140);
+        ctx.lineTo(160, 110);
+        ctx.lineTo(180, 140);
+        ctx.stroke();
+
+        // Draw sun/circle
+        ctx.beginPath();
+        ctx.arc(170, 100, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw arrow
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(128, 190);
+        ctx.lineTo(128, 220);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(115, 210);
+        ctx.lineTo(128, 223);
+        ctx.lineTo(141, 210);
+        ctx.stroke();
+
+        // Text
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('AI', 128, 245);
+
+        // Convert to data URL and log
+        const dataUrl = canvas.toDataURL('image/png');
+        console.log('Icon created. Save the following base64 data:');
+
+        // Create download link
+        const link = document.createElement('a');
+        link.download = 'icon.png';
+        link.href = dataUrl;
+        link.textContent = 'Download icon.png';
+        document.body.appendChild(link);
+    </script>
+</body>
+</html>
