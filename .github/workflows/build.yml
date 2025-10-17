@@ -6,6 +6,9 @@ on:
       - 'v*' # v1.0.0 형태의 태그가 푸시될 때 실행
   workflow_dispatch: # 수동 실행 가능
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
