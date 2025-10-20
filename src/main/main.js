@@ -7,6 +7,11 @@ const http = require('http');
 // 하드웨어 가속 비활성화 (캐시 오류 방지)
 app.disableHardwareAcceleration();
 
+// GPU 캐시 완전 비활성화 (권한 오류 방지)
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disable-http-cache');
+app.commandLine.appendSwitch('disk-cache-size', '0');
+
 // 캐시 경로 설정 (권한 오류 방지)
 app.setPath('userData', path.join(app.getPath('appData'), 'image-converter-app'));
 
@@ -14,11 +19,40 @@ let mainWindow = null;
 const isDev = process.argv.includes('--dev');
 
 function createMenu() {
+  const isMac = process.platform === 'darwin';
+
   const template = [
+    // macOS용 App 메뉴
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { label: 'About AI Image Converter', role: 'about' },
+        { type: 'separator' },
+        { label: 'Hide AI Image Converter', role: 'hide' },
+        { label: 'Hide Others', role: 'hideOthers' },
+        { label: 'Show All', role: 'unhide' },
+        { type: 'separator' },
+        { label: 'Quit', role: 'quit' }
+      ]
+    }] : []),
+    // Edit 메뉴 (복사/붙여넣기 지원)
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', role: 'redo' },
+        { type: 'separator' },
+        { label: 'Cut', accelerator: 'CmdOrCtrl+X', role: 'cut' },
+        { label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' },
+        { label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' },
+        { label: 'Select All', accelerator: 'CmdOrCtrl+A', role: 'selectAll' }
+      ]
+    },
+    // Help 메뉴
     {
       label: 'Help',
       submenu: [
-        {
+        ...(!isMac ? [{
           label: 'About AI Image Converter',
           click: () => {
             dialog.showMessageBox(mainWindow, {
@@ -29,7 +63,7 @@ function createMenu() {
               buttons: ['OK']
             });
           }
-        }
+        }] : [])
       ]
     }
   ];
