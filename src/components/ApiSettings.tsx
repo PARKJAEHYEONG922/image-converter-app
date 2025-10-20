@@ -327,20 +327,21 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
                         <span>무료 사용 혜택</span>
                       </div>
                       <div className="space-y-1.5">
-                        <div className="font-semibold text-blue-300">옵션 1: Google AI Studio 무료 티어</div>
-                        <div>• <strong>무료 사용량:</strong> 250 요청/일 (Gemini 2.5 Flash)</div>
-                        <div>• <strong>초과 시:</strong> 자동 과금 ($0.039/이미지)</div>
-                        <div>• <strong>별도 설정 불필요</strong></div>
-
-                        <div className="font-semibold text-blue-300 mt-2">옵션 2: GCP $300 크레딧 활용 (추천)</div>
+                        <div className="font-semibold text-blue-300">GCP $300 무료 크레딧 활용 (추천 ⭐)</div>
                         <div>• <strong>신규 가입 시:</strong> $300 무료 크레딧 (90일)</div>
-                        <div>• <strong>Google AI Studio와 연동 가능!</strong></div>
-                        <div>• <strong>설정 방법:</strong> AI Studio → Set up Billing → GCP 계정 연결</div>
-                        <div>• <strong>혜택:</strong> $300 크레딧으로 약 7,600장 생성 가능</div>
+                        <div>• <strong>카드 등록:</strong> 결제 수단 등록 필요 (90일 후 자동 과금 없음)</div>
+                        <div>• <strong>설정 방법:</strong>
+                          <div className="ml-4 mt-1 space-y-0.5 text-xs">
+                            <div>1. <a href="https://cloud.google.com/free" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-purple-200 underline" onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://cloud.google.com/free'); }}>GCP 신규 가입</a> (카드 등록)</div>
+                            <div>2. AI Studio → Set up Billing → GCP 계정 연결</div>
+                          </div>
+                        </div>
+                        <div>• <strong>혜택:</strong> $300 크레딧으로 약 <span className="text-yellow-300 font-bold">7,600장</span> 생성 가능</div>
+                        <div>• <strong>이미지 생성 비용:</strong> $0.039/장</div>
 
                         <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
                           <div className="text-yellow-400 text-xs">
-                            💡 <strong>팁:</strong> GCP 신규 가입 후 AI Studio와 연결하면 $300 크레딧 사용 가능!
+                            💡 <strong>중요:</strong> 이미지 생성 API는 무료 티어가 없습니다. GCP $300 크레딧을 사용하면 90일 동안 무료로 사용 가능!
                           </div>
                         </div>
                       </div>
