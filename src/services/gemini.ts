@@ -1,9 +1,30 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import type { GeminiModel, OutputResolution } from '../types/global';
 
 let genAI: GoogleGenerativeAI | null = null;
+let currentModel: GeminiModel = 'gemini-2.5-flash-image-preview';
+let currentResolution: OutputResolution = '1k';
 
 export const initializeGemini = (apiKey: string) => {
   genAI = new GoogleGenerativeAI(apiKey);
+};
+
+export const setGeminiModel = (model: GeminiModel) => {
+  currentModel = model;
+  console.log(`🔄 Gemini 모델 변경: ${model}`);
+};
+
+export const setOutputResolution = (resolution: OutputResolution) => {
+  currentResolution = resolution;
+  console.log(`📐 출력 해상도 변경: ${resolution}`);
+};
+
+export const getCurrentModel = (): GeminiModel => {
+  return currentModel;
+};
+
+export const getCurrentResolution = (): OutputResolution => {
+  return currentResolution;
 };
 
 export const generateImage = async (
@@ -23,7 +44,7 @@ export const generateImage = async (
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🟡 Gemini 2.5 Flash Image 이미지 생성 시작 (${attempt}/${maxRetries})`);
+      console.log(`🟡 ${currentModel} 이미지 생성 시작 (${attempt}/${maxRetries})`);
 
       // 프롬프트 향상
       let enhancedPrompt = prompt;
@@ -102,12 +123,24 @@ export const generateImage = async (
       // generationConfig 구성
       const generationConfig: any = {};
 
-      // aspectRatio 옵션이 있으면 imageConfig 추가
+      // imageConfig 구성
+      const imageConfig: any = {};
+
+      // aspectRatio 옵션이 있으면 추가
       if (options?.aspectRatio && options.aspectRatio !== 'original') {
-        generationConfig.imageConfig = {
-          aspectRatio: options.aspectRatio
-        };
+        imageConfig.aspectRatio = options.aspectRatio;
         console.log(`📐 Aspect Ratio 설정: ${options.aspectRatio}`);
+      }
+
+      // Pro 모델일 때 해상도 설정 추가 (대문자 K 필수)
+      if (currentModel === 'gemini-3-pro-image-preview' && currentResolution !== '1k') {
+        imageConfig.imageSize = currentResolution === '4k' ? '4K' : '2K';
+        console.log(`🖼️ 출력 해상도 설정: ${imageConfig.imageSize}`);
+      }
+
+      // imageConfig가 비어있지 않으면 generationConfig에 추가
+      if (Object.keys(imageConfig).length > 0) {
+        generationConfig.imageConfig = imageConfig;
       }
 
       // Gemini 2.5 Flash Image Preview 모델 사용
@@ -124,7 +157,7 @@ export const generateImage = async (
 
       const apiKey = (genAI as any).apiKey;
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: {

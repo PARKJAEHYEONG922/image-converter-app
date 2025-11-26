@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const https = require('https');
@@ -35,6 +35,14 @@ function createMenu() {
         { label: 'Quit', role: 'quit' }
       ]
     }] : []),
+    // View 메뉴 (새로고침)
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Reload', accelerator: 'CmdOrCtrl+R', role: 'reload' },
+        { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', role: 'forceReload' }
+      ]
+    },
     // Edit 메뉴 (복사/붙여넣기 지원)
     {
       label: 'Edit',
@@ -92,19 +100,22 @@ function createWindow() {
     callback({ requestHeaders: { ...details.requestHeaders } });
   });
 
+  // 프로덕션에서만 DevTools 단축키 비활성화
+  if (!isDev) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      const key = input.key.toLowerCase();
+      if (input.key === 'F12' ||
+          (input.control && input.shift && ['i', 'j', 'c'].includes(key))) {
+        event.preventDefault();
+      }
+    });
+  }
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-    // Disable DevTools shortcuts in production
-    mainWindow.webContents.on('before-input-event', (event, input) => {
-      // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
-      if (input.key === 'F12' ||
-          (input.control && input.shift && (input.key === 'I' || input.key === 'J' || input.key === 'C'))) {
-        event.preventDefault();
-      }
-    });
   }
 
   mainWindow.on('closed', () => {
@@ -122,6 +133,7 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -200,51 +212,92 @@ ipcMain.handle('open-external', async (_, url) => {
   return true;
 });
 
-// Download image from URL
+// Download image from URL (Electron net 모듈 사용 - 더 나은 호환성)
 ipcMain.handle('download-image', async (_, imageUrl) => {
   return new Promise((resolve, reject) => {
-    const protocol = imageUrl.startsWith('https') ? https : http;
+    // Electron net 모듈 사용 (Chromium 네트워크 스택, 더 나은 호환성)
+    const request = net.request({
+      url: imageUrl,
+      method: 'GET'
+    });
 
-    protocol.get(imageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'image/*',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': imageUrl.split('/').slice(0, 3).join('/')
-      }
-    }, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        // Follow redirects
-        const redirectUrl = response.headers.location;
-        const redirectProtocol = redirectUrl.startsWith('https') ? https : http;
-        redirectProtocol.get(redirectUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'image/*'
-          }
-        }, (redirectResponse) => {
-          handleResponse(redirectResponse);
-        }).on('error', reject);
-      } else {
-        handleResponse(response);
+    // 브라우저처럼 헤더 설정
+    request.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    request.setHeader('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8');
+    request.setHeader('Accept-Language', 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+    request.setHeader('Accept-Encoding', 'gzip, deflate, br');
+    request.setHeader('Sec-Fetch-Dest', 'image');
+    request.setHeader('Sec-Fetch-Mode', 'no-cors');
+    request.setHeader('Sec-Fetch-Site', 'cross-site');
+
+    const chunks = [];
+    let contentType = 'image/png';
+
+    request.on('response', (response) => {
+      // 리다이렉트는 net 모듈이 자동 처리
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download image: ${response.statusCode}`));
+        return;
       }
 
-      function handleResponse(res) {
-        if (res.statusCode !== 200) {
-          reject(new Error(`Failed to download image: ${res.statusCode}`));
-          return;
+      contentType = response.headers['content-type'] || 'image/png';
+      if (Array.isArray(contentType)) {
+        contentType = contentType[0];
+      }
+
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        const base64 = buffer.toString('base64');
+        resolve(`data:${contentType};base64,${base64}`);
+      });
+      response.on('error', reject);
+    });
+
+    request.on('error', (error) => {
+      // net 모듈 실패 시 기존 방식으로 fallback
+      console.log('net 모듈 실패, http/https로 재시도:', error.message);
+
+      const protocol = imageUrl.startsWith('https') ? https : http;
+      protocol.get(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/*',
+          'Referer': imageUrl
         }
+      }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          const redirectUrl = res.headers.location;
+          const redirectProtocol = redirectUrl.startsWith('https') ? https : http;
+          redirectProtocol.get(redirectUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'image/*'
+            }
+          }, (redirectRes) => handleFallbackResponse(redirectRes, resolve, reject))
+            .on('error', reject);
+        } else {
+          handleFallbackResponse(res, resolve, reject);
+        }
+      }).on('error', reject);
+    });
 
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const buffer = Buffer.concat(chunks);
-          const base64 = buffer.toString('base64');
-          const contentType = res.headers['content-type'] || 'image/png';
-          resolve(`data:${contentType};base64,${base64}`);
-        });
-        res.on('error', reject);
-      }
-    }).on('error', reject);
+    request.end();
   });
 });
+
+function handleFallbackResponse(res, resolve, reject) {
+  if (res.statusCode !== 200) {
+    reject(new Error(`Failed to download image: ${res.statusCode}`));
+    return;
+  }
+  const chunks = [];
+  res.on('data', (chunk) => chunks.push(chunk));
+  res.on('end', () => {
+    const buffer = Buffer.concat(chunks);
+    const base64 = buffer.toString('base64');
+    const contentType = res.headers['content-type'] || 'image/png';
+    resolve(`data:${contentType};base64,${base64}`);
+  });
+  res.on('error', reject);
+}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from './Button';
-import { initializeGemini } from '../services/gemini';
+import { initializeGemini, setGeminiModel, setOutputResolution as setGeminiResolution } from '../services/gemini';
+import type { GeminiModel, GeminiModelInfo, OutputResolution } from '../types/global';
 
 interface ApiSettingsProps {
   isOpen: boolean;
@@ -13,9 +14,33 @@ interface TestStatus {
   message: string;
 }
 
+// 사용 가능한 Gemini 이미지 생성 모델 목록
+const GEMINI_MODELS: GeminiModelInfo[] = [
+  {
+    id: 'gemini-2.5-flash-image',
+    name: 'Gemini 2.5 Flash Image (안정)',
+    description: '안정 버전 - 빠르고 효율적인 이미지 생성 (1K 해상도)',
+    tier: 'flash'
+  },
+  {
+    id: 'gemini-2.5-flash-image-preview',
+    name: 'Gemini 2.5 Flash Image Preview (Nano Banana 🍌)',
+    description: '프리뷰 버전 - 기존에 사용하던 모델, 이미지 생성/편집 특화',
+    tier: 'flash'
+  },
+  {
+    id: 'gemini-3-pro-image-preview',
+    name: 'Gemini 3.0 Pro Image (최신 🔥)',
+    description: '최신 Pro 모델 - 고해상도(4K), 최대 14개 참조 이미지, 고급 기능',
+    tier: 'pro'
+  }
+];
+
 const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [savedApiKey, setSavedApiKey] = useState('');
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash-image-preview');
+  const [outputResolution, setOutputResolution] = useState<OutputResolution>('1k');
   const [testStatus, setTestStatus] = useState<TestStatus>({
     testing: false,
     success: false,
@@ -36,6 +61,14 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
         setApiKey(settings.geminiApiKey);
         setSavedApiKey(settings.geminiApiKey);
         initializeGemini(settings.geminiApiKey);
+      }
+      if (settings.geminiModel) {
+        setSelectedModel(settings.geminiModel);
+        setGeminiModel(settings.geminiModel);
+      }
+      if (settings.outputResolution) {
+        setOutputResolution(settings.outputResolution);
+        setGeminiResolution(settings.outputResolution);
       }
     } catch (error) {
       console.error('설정 로드 실패:', error);
@@ -73,11 +106,15 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
       if (response.ok) {
         // 테스트 성공 시 저장
         await window.electronAPI.saveApiSettings({
-          geminiApiKey: apiKey.trim()
+          geminiApiKey: apiKey.trim(),
+          geminiModel: selectedModel,
+          outputResolution: outputResolution
         });
 
         // Gemini 초기화
         initializeGemini(apiKey.trim());
+        setGeminiModel(selectedModel);
+        setGeminiResolution(outputResolution);
         setSavedApiKey(apiKey.trim());
 
         setTestStatus({
@@ -156,7 +193,9 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
               </div>
               <div>
                 <span className="text-gray-400 block mb-1">모델</span>
-                <span className="font-semibold text-purple-300">Gemini 2.5 Flash Image</span>
+                <span className="font-semibold text-purple-300">
+                  {GEMINI_MODELS.find(m => m.id === selectedModel)?.name || 'Gemini 2.5 Flash Image'}
+                </span>
               </div>
               <div>
                 <span className="text-gray-400 block mb-1">API 키</span>
@@ -231,6 +270,56 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
                     />
                   </div>
                 </div>
+
+                {/* 모델 선택 드롭다운 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    모델 선택
+                  </label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value as GeminiModel)}
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all cursor-pointer"
+                  >
+                    {GEMINI_MODELS.map((model) => (
+                      <option key={model.id} value={model.id} className="bg-gray-800">
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                  {/* 선택된 모델 설명 */}
+                  <div className="mt-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                    <p className="text-sm text-gray-400">
+                      {GEMINI_MODELS.find(m => m.id === selectedModel)?.description}
+                    </p>
+                    {GEMINI_MODELS.find(m => m.id === selectedModel)?.tier === 'pro' && (
+                      <p className="text-xs text-emerald-400 mt-1">
+                        ✨ Pro 모델 - 더 높은 품질과 고급 기능 제공
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 해상도 선택 (Pro 모델 전용) */}
+                {selectedModel === 'gemini-3-pro-image-preview' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      출력 해상도
+                    </label>
+                    <select
+                      value={outputResolution}
+                      onChange={(e) => setOutputResolution(e.target.value as OutputResolution)}
+                      className="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all cursor-pointer"
+                    >
+                      <option value="1k" className="bg-gray-800">1K (기본)</option>
+                      <option value="2k" className="bg-gray-800">2K (고해상도)</option>
+                      <option value="4k" className="bg-gray-800">4K (최고 해상도)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      해상도가 높을수록 생성 시간과 비용이 증가합니다
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex gap-3">
                   <Button

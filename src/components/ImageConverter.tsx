@@ -119,14 +119,52 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     const maxImages = getMaxImages();
 
     if (maxImages === 0) return;
+    if (files.length === 0) return;
 
-    const remainingSlots = maxImages - selectedImages.length;
+    // 슬롯이 꽉 찬 경우: 교체 모드
+    if (selectedImages.length >= maxImages) {
+      if (maxImages === 1) {
+        // 단일 이미지 모드: 새 이미지로 교체
+        const newFile = files[0];
+        setSelectedImages([newFile]);
 
-    if (remainingSlots <= 0) {
-      setError(`최대 ${maxImages}개까지만 선택 가능합니다.`);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setImagePreviews([e.target?.result as string]);
+        };
+        reader.readAsDataURL(newFile);
+      } else {
+        // 다중 이미지 모드: 첫 번째 이미지 제거 후 새 이미지 추가 (FIFO)
+        const newFiles = files.slice(0, files.length);
+        const removeCount = Math.min(newFiles.length, selectedImages.length);
+        const remainingImages = selectedImages.slice(removeCount);
+        const remainingPreviews = imagePreviews.slice(removeCount);
+
+        setSelectedImages([...remainingImages, ...newFiles].slice(0, maxImages));
+
+        // 새 이미지들의 프리뷰 생성
+        const newPreviews: string[] = [];
+        let loadedCount = 0;
+
+        newFiles.forEach((file) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            newPreviews.push(e.target?.result as string);
+            loadedCount++;
+            if (loadedCount === newFiles.length) {
+              setImagePreviews([...remainingPreviews, ...newPreviews].slice(0, maxImages));
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+      setError(null);
+      event.target.value = '';
       return;
     }
 
+    // 슬롯에 여유 있는 경우: 추가 모드
+    const remainingSlots = maxImages - selectedImages.length;
     const newFiles = files.slice(0, remainingSlots);
     const updatedFiles = [...selectedImages, ...newFiles];
 
@@ -142,7 +180,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     });
 
     event.target.value = '';
-  }, [selectedImages, mode]);
+  }, [selectedImages, imagePreviews, mode]);
 
   const handleRemoveImage = useCallback((index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
@@ -155,23 +193,35 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
 
     if (maxImages === 0) return;
 
-    const remainingSlots = maxImages - selectedImages.length;
-    if (remainingSlots <= 0) {
-      setError(`최대 ${maxImages}개까지만 선택 가능합니다.`);
-      return;
-    }
+    const isFull = selectedImages.length >= maxImages;
+
+    // 이미지 추가/교체 헬퍼 함수
+    const addOrReplaceImage = (file: File, preview: string) => {
+      if (isFull) {
+        if (maxImages === 1) {
+          // 단일 이미지 모드: 교체
+          setSelectedImages([file]);
+          setImagePreviews([preview]);
+        } else {
+          // 다중 이미지 모드: FIFO (첫 번째 제거 후 추가)
+          setSelectedImages(prev => [...prev.slice(1), file]);
+          setImagePreviews(prev => [...prev.slice(1), preview]);
+        }
+      } else {
+        // 슬롯 여유 있음: 추가
+        setSelectedImages(prev => [...prev, file]);
+        setImagePreviews(prev => [...prev, preview]);
+      }
+      setError(null);
+    };
 
     if (imageData instanceof File) {
       // Handle File object from clipboard paste
-      setSelectedImages(prev => [...prev, imageData]);
-
       const reader = new FileReader();
       reader.onload = (e) => {
-        setImagePreviews(prev => [...prev, e.target?.result as string]);
+        addOrReplaceImage(imageData, e.target?.result as string);
       };
       reader.readAsDataURL(imageData);
-
-      setError(null);
     } else if (typeof imageData === 'string') {
       // Handle URL string using Electron API to avoid CORS
       try {
@@ -183,15 +233,13 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
         const blob = await base64Response.blob();
         const file = new File([blob], `url-image-${Date.now()}.png`, { type: blob.type });
 
-        setSelectedImages(prev => [...prev, file]);
-        setImagePreviews(prev => [...prev, base64Data]);
-        setError(null);
+        addOrReplaceImage(file, base64Data);
       } catch (err) {
         console.error('URL 이미지 가져오기 실패:', err);
         setError('이미지 URL에서 이미지를 가져올 수 없습니다. 일부 사이트는 외부 접근을 제한합니다.');
       }
     }
-  }, [selectedImages, mode]);
+  }, [selectedImages, imagePreviews, mode]);
 
   const fileToDataUrl = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -535,11 +583,13 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                   {imagePreviews.length > 0 && (
                     <div className={`grid ${imagePreviews.length === 1 ? 'grid-cols-1' : imagePreviews.length === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
                       {imagePreviews.map((preview, index) => (
-                        <div key={index} className="relative group">
+                        <div key={index} className="relative group bg-gray-100 rounded-lg border-2 border-gray-200 flex items-center justify-center"
+                          style={{ height: imagePreviews.length === 1 ? '160px' : imagePreviews.length === 2 ? '120px' : '100px' }}
+                        >
                           <img
                             src={preview}
                             alt={`Preview ${index + 1}`}
-                            className={`w-full ${imagePreviews.length === 1 ? 'h-48' : 'h-32'} object-cover rounded-lg border-2 border-gray-200`}
+                            className="max-w-full max-h-full object-contain rounded-lg"
                           />
                           <button
                             onClick={() => handleRemoveImage(index)}
@@ -547,9 +597,20 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                           >
                             ✕
                           </button>
+                          {/* 이미지 번호 표시 */}
+                          <div className="absolute top-1 left-1 bg-purple-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-md">
+                            {index + 1}
+                          </div>
+                          {/* 스타일 전송 모드: 역할 표시 */}
                           {mode === 'style-transfer' && (
                             <div className="absolute bottom-1 left-1 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
                               {index === 0 ? '스타일' : '콘텐츠'}
+                            </div>
+                          )}
+                          {/* 다중 합성 모드: 번호 라벨 표시 */}
+                          {mode === 'multi-image-composition' && (
+                            <div className="absolute bottom-1 left-1 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+                              {index + 1}번 이미지
                             </div>
                           )}
                         </div>
@@ -901,11 +962,14 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
               const allImages = [imageModal.imageUrl, ...imageHistory.filter(url => url !== imageModal.imageUrl)];
 
               return allImages.length > 1 && (
-                <div className="bg-black bg-opacity-75 rounded-lg p-4 max-w-screen-xl mt-4">
-                  <div className="text-white text-sm mb-3 text-center">
+                <div className="bg-black bg-opacity-75 rounded-lg p-3 mt-4 w-full max-w-[85vw]">
+                  <div className="text-white text-sm mb-2 text-center">
                     📸 이미지 갤러리 ({allImages.length}개)
                   </div>
-                  <div className="flex gap-2 overflow-x-auto justify-center pb-1">
+                  <div
+                    className="flex gap-2 overflow-x-auto pb-2 px-1"
+                    style={{ scrollbarWidth: 'thin', scrollbarColor: '#666 #333' }}
+                  >
                     {allImages.map((imageUrl, index) => (
                       <div
                         key={index}
@@ -919,11 +983,11 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                         <img
                           src={imageUrl}
                           alt={`버전 ${index + 1}`}
-                          className="w-24 h-24 object-cover"
+                          className="w-16 h-16 object-cover"
                         />
                         {imageUrl === imageModal.imageUrl && (
                           <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
-                            <div className="bg-blue-500 text-white text-xs px-2 py-1 rounded">
+                            <div className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded">
                               현재
                             </div>
                           </div>
