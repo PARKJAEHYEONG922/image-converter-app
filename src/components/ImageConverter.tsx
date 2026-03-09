@@ -1,21 +1,28 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './Button';
 import ImagePasteDialog from './ImagePasteDialog';
+import ImageMarkupModal from './ImageMarkupModal';
 import SaveSuccessDialog from './SaveSuccessDialog';
-import { generateImage } from '../services/gemini';
+import ColorTransferModal from './ColorTransferModal';
+import RelightModal from './RelightModal';
+import InpaintModal from './InpaintModal';
+import AnglesModal from './AnglesModal';
+import BackgroundRemoval from './BackgroundRemoval';
+import { generateImage, getCurrentModel, setGeminiModel, getCurrentResolution, setOutputResolution } from '../services/gemini';
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
-type ImageMode = 'text-to-image' | 'edit-image' | 'multi-image-composition' | 'style-transfer';
-type AspectRatio = 'original' | '1:1' | '3:4' | '4:3' | '9:16' | '16:9' | '21:9';
+type ImageMode = 'text-to-image' | 'edit-image' | 'background-removal';
+type AspectRatio = '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '4:5' | '5:4' | '9:16' | '16:9' | '21:9' | '1:4' | '4:1' | '1:8' | '8:1';
 
 interface ModeState {
   selectedImages: File[];
   imagePreviews: string[];
   prompt: string;
   aspectRatio: AspectRatio;
+  imageCount: number;
   transformedImages: string[];
-  imageHistory: string[];
+  imageHistory: string[][];
 }
 
 interface ImageConverterProps {
@@ -24,6 +31,8 @@ interface ImageConverterProps {
 
 const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const [mode, setMode] = useState<ImageMode>('text-to-image');
+  const [activeModel, setActiveModel] = useState(getCurrentModel());
+  const [activeResolution, setActiveResolution] = useState(getCurrentResolution());
 
   const [modeStates, setModeStates] = useState<Record<ImageMode, ModeState>>({
     'text-to-image': {
@@ -31,6 +40,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       imagePreviews: [],
       prompt: '',
       aspectRatio: '1:1',
+      imageCount: 1,
       transformedImages: [],
       imageHistory: []
     },
@@ -38,23 +48,17 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       selectedImages: [],
       imagePreviews: [],
       prompt: '',
-      aspectRatio: 'original',
+      aspectRatio: '1:1',
+      imageCount: 1,
       transformedImages: [],
       imageHistory: []
     },
-    'multi-image-composition': {
+    'background-removal': {
       selectedImages: [],
       imagePreviews: [],
       prompt: '',
-      aspectRatio: 'original',
-      transformedImages: [],
-      imageHistory: []
-    },
-    'style-transfer': {
-      selectedImages: [],
-      imagePreviews: [],
-      prompt: '',
-      aspectRatio: 'original',
+      aspectRatio: '1:1',
+      imageCount: 1,
       transformedImages: [],
       imageHistory: []
     }
@@ -65,10 +69,17 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const [imagePreviews, setImagePreviews] = useState<string[]>(currentState.imagePreviews);
   const [prompt, setPrompt] = useState(currentState.prompt);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(currentState.aspectRatio);
+  const [imageCount, setImageCount] = useState(currentState.imageCount);
   const [transformedImages, setTransformedImages] = useState<string[]>(currentState.transformedImages);
-  const [imageHistory, setImageHistory] = useState<string[]>(currentState.imageHistory);
-  const [imageStyle, setImageStyle] = useState<'photographic' | 'illustration' | 'minimalist' | 'natural'>('photographic');
+  const [imageHistory, setImageHistory] = useState<string[][]>(currentState.imageHistory);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
 
+  const [isRatioOpen, setIsRatioOpen] = useState(false);
+  const [colorPalette, setColorPalette] = useState<string[] | null>(null);
+  const [colorTransferOpen, setColorTransferOpen] = useState(false);
+  const [relightOpen, setRelightOpen] = useState(false);
+  const [inpaintOpen, setInpaintOpen] = useState(false);
+  const [anglesOpen, setAnglesOpen] = useState(false);
   const [isTransforming, setIsTransforming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +95,11 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
 
   // Paste dialog state
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
+  const [imagesExpanded, setImagesExpanded] = useState(false);
+  const [markupModal, setMarkupModal] = useState<{ isOpen: boolean; index: number; imageUrl: string }>({
+    isOpen: false, index: -1, imageUrl: ''
+  });
+  const originalImagesRef = useRef<Map<number, string>>(new Map());
 
   // Save dialog state
   const [saveDialogState, setSaveDialogState] = useState<{
@@ -94,24 +110,53 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     filePath: null
   });
 
+  // Drag reorder state
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (index: number) => {
+    if (dragIndex === null || dragIndex === index) {
+      setDragIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    // Reorder images and previews
+    const newImages = [...selectedImages];
+    const newPreviews = [...imagePreviews];
+    const [movedImage] = newImages.splice(dragIndex, 1);
+    const [movedPreview] = newPreviews.splice(dragIndex, 1);
+    newImages.splice(index, 0, movedImage);
+    newPreviews.splice(index, 0, movedPreview);
+    setSelectedImages(newImages);
+    setImagePreviews(newPreviews);
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
   // Crop states
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const getMaxImages = () => {
-    switch (mode) {
-      case 'text-to-image':
-        return 0;
-      case 'edit-image':
-        return 1;
-      case 'style-transfer':
-        return 2;
-      case 'multi-image-composition':
-        return 3;
-      default:
-        return 1;
-    }
+    if (mode === 'text-to-image') return 0;
+    const model = getCurrentModel();
+    // 3.1 Flash: 최대 14장, 2.5 Flash: 최대 3장 (공식 문서 기준)
+    return model === 'gemini-3.1-flash-image-preview' ? 14 : 3;
   };
 
   const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,43 +166,29 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     if (maxImages === 0) return;
     if (files.length === 0) return;
 
-    // 슬롯이 꽉 찬 경우: 교체 모드
+    // 슬롯이 꽉 찬 경우: FIFO 교체
     if (selectedImages.length >= maxImages) {
-      if (maxImages === 1) {
-        // 단일 이미지 모드: 새 이미지로 교체
-        const newFile = files[0];
-        setSelectedImages([newFile]);
+      const newFiles = files.slice(0, files.length);
+      const removeCount = Math.min(newFiles.length, selectedImages.length);
+      const remainingImages = selectedImages.slice(removeCount);
+      const remainingPreviews = imagePreviews.slice(removeCount);
 
+      setSelectedImages([...remainingImages, ...newFiles].slice(0, maxImages));
+
+      const newPreviews: string[] = [];
+      let loadedCount = 0;
+
+      newFiles.forEach((file) => {
         const reader = new FileReader();
         reader.onload = (e) => {
-          setImagePreviews([e.target?.result as string]);
+          newPreviews.push(e.target?.result as string);
+          loadedCount++;
+          if (loadedCount === newFiles.length) {
+            setImagePreviews([...remainingPreviews, ...newPreviews].slice(0, maxImages));
+          }
         };
-        reader.readAsDataURL(newFile);
-      } else {
-        // 다중 이미지 모드: 첫 번째 이미지 제거 후 새 이미지 추가 (FIFO)
-        const newFiles = files.slice(0, files.length);
-        const removeCount = Math.min(newFiles.length, selectedImages.length);
-        const remainingImages = selectedImages.slice(removeCount);
-        const remainingPreviews = imagePreviews.slice(removeCount);
-
-        setSelectedImages([...remainingImages, ...newFiles].slice(0, maxImages));
-
-        // 새 이미지들의 프리뷰 생성
-        const newPreviews: string[] = [];
-        let loadedCount = 0;
-
-        newFiles.forEach((file) => {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            newPreviews.push(e.target?.result as string);
-            loadedCount++;
-            if (loadedCount === newFiles.length) {
-              setImagePreviews([...remainingPreviews, ...newPreviews].slice(0, maxImages));
-            }
-          };
-          reader.readAsDataURL(file);
-        });
-      }
+        reader.readAsDataURL(file);
+      });
       setError(null);
       event.target.value = '';
       return;
@@ -185,6 +216,15 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const handleRemoveImage = useCallback((index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    // Clean up original image reference
+    originalImagesRef.current.delete(index);
+    // Re-index remaining originals
+    const newMap = new Map<number, string>();
+    originalImagesRef.current.forEach((url, key) => {
+      if (key > index) newMap.set(key - 1, url);
+      else newMap.set(key, url);
+    });
+    originalImagesRef.current = newMap;
   }, []);
 
   // Handle image paste from dialog
@@ -198,17 +238,10 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     // 이미지 추가/교체 헬퍼 함수
     const addOrReplaceImage = (file: File, preview: string) => {
       if (isFull) {
-        if (maxImages === 1) {
-          // 단일 이미지 모드: 교체
-          setSelectedImages([file]);
-          setImagePreviews([preview]);
-        } else {
-          // 다중 이미지 모드: FIFO (첫 번째 제거 후 추가)
-          setSelectedImages(prev => [...prev.slice(1), file]);
-          setImagePreviews(prev => [...prev.slice(1), preview]);
-        }
+        // FIFO: 첫 번째 제거 후 추가
+        setSelectedImages(prev => [...prev.slice(1), file]);
+        setImagePreviews(prev => [...prev.slice(1), preview]);
       } else {
-        // 슬롯 여유 있음: 추가
         setSelectedImages(prev => [...prev, file]);
         setImagePreviews(prev => [...prev, preview]);
       }
@@ -256,16 +289,6 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       return;
     }
 
-    if (mode === 'style-transfer' && selectedImages.length !== 2) {
-      setError('스타일 전송은 정확히 2개의 이미지가 필요합니다.');
-      return;
-    }
-
-    if (mode === 'multi-image-composition' && selectedImages.length < 2) {
-      setError('다중 이미지 합성은 최소 2개 이상의 이미지가 필요합니다.');
-      return;
-    }
-
     if (!prompt.trim()) {
       setError('프롬프트를 입력해주세요.');
       return;
@@ -275,50 +298,45 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     setError(null);
 
     try {
-      let imageUrl: string;
-
-      if (mode === 'text-to-image') {
-        imageUrl = await generateImage(prompt, { aspectRatio, style: imageStyle });
-      } else {
-        let fullPrompt = prompt;
-
-        if (mode === 'edit-image') {
-          fullPrompt = `Edit this image: ${prompt}`;
-        } else if (mode === 'multi-image-composition') {
-          fullPrompt = `Create a new image by combining the elements from the provided images. ${prompt}`;
-        } else if (mode === 'style-transfer') {
-          fullPrompt = `Apply style transfer: ${prompt}`;
-        }
-
-        if (aspectRatio === 'original') {
-          fullPrompt += '. Do not change the input aspect ratio.';
-        }
-
-        const imageOptions: any = {};
-        if (aspectRatio !== 'original') {
-          imageOptions.aspectRatio = aspectRatio;
-        } else {
-          imageOptions.aspectRatio = null;
-        }
-
-        if (mode === 'multi-image-composition') {
+      // Build options once
+      const imageOptions: any = { aspectRatio };
+      if (mode !== 'text-to-image') {
+        if (selectedImages.length > 1) {
           const imageDataUrls = await Promise.all(
             selectedImages.map(file => fileToDataUrl(file))
           );
           imageOptions.referenceImages = imageDataUrls;
         } else {
-          const referenceImage = await fileToDataUrl(selectedImages[0]);
-          imageOptions.referenceImage = referenceImage;
+          imageOptions.referenceImage = await fileToDataUrl(selectedImages[0]);
         }
-
-        imageUrl = await generateImage(fullPrompt, imageOptions);
       }
 
-      if (imageUrl) {
+      // Build final prompt with color palette if set
+      let finalPrompt = prompt;
+      if (colorPalette && colorPalette.length > 0) {
+        finalPrompt += `\n\nApply the following color palette/mood to this image: ${colorPalette.join(', ')}. Use these colors as the dominant tones and color grading for the output.`;
+      }
+
+      // Send N parallel requests
+      let lastError: any = null;
+      const promises = Array.from({ length: imageCount }, () =>
+        generateImage(finalPrompt, { ...imageOptions }).catch((err) => {
+          console.error('개별 이미지 생성 실패:', err);
+          lastError = err;
+          return null;
+        })
+      );
+      const results = await Promise.all(promises);
+      const successImages = results.filter((url): url is string => url !== null && url !== '');
+
+      if (successImages.length > 0) {
         if (transformedImages.length > 0) {
-          setImageHistory(prev => [...transformedImages, ...prev]);
+          setImageHistory(prev => [transformedImages, ...prev]);
         }
-        setTransformedImages([imageUrl]);
+        setTransformedImages(successImages);
+        setSelectedResultIndex(0);
+      } else if (lastError) {
+        throw lastError;
       } else {
         setError('이미지 생성/변환에 실패했습니다.');
       }
@@ -328,7 +346,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     } finally {
       setIsTransforming(false);
     }
-  }, [mode, selectedImages, prompt, aspectRatio, transformedImages, imageStyle]);
+  }, [mode, selectedImages, prompt, aspectRatio, imageCount, transformedImages, colorPalette]);
 
   const openImageModal = useCallback((imageUrl: string) => {
     setImageModal({
@@ -341,6 +359,26 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   }, []);
 
   const closeImageModal = useCallback(() => {
+    // Sync: if the currently viewed image is in a history set, swap it into transformedImages
+    const viewedUrl = imageModal.imageUrl;
+    if (viewedUrl && !transformedImages.includes(viewedUrl)) {
+      // Find which history set has this image
+      const setIdx = imageHistory.findIndex(set => set.includes(viewedUrl));
+      if (setIdx >= 0) {
+        const historySet = imageHistory[setIdx];
+        const newHistory = [...imageHistory];
+        newHistory.splice(setIdx, 1);
+        if (transformedImages.length > 0) {
+          newHistory.unshift(transformedImages);
+        }
+        setImageHistory(newHistory);
+        setTransformedImages(historySet);
+        setSelectedResultIndex(historySet.indexOf(viewedUrl));
+      }
+    } else if (viewedUrl && transformedImages.includes(viewedUrl)) {
+      setSelectedResultIndex(transformedImages.indexOf(viewedUrl));
+    }
+
     setImageModal({
       isOpen: false,
       imageUrl: '',
@@ -348,18 +386,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     });
     setCrop(undefined);
     setCompletedCrop(null);
-  }, []);
-
-  const selectImageFromGallery = useCallback((imageUrl: string) => {
-    if (transformedImages.length > 0) {
-      setImageHistory(prev => [...transformedImages, ...prev]);
-    }
-    setTransformedImages([imageUrl]);
-    setImageHistory(prev => prev.filter(url => url !== imageUrl));
-    setImageModal(prev => ({ ...prev, imageUrl, isCropping: false }));
-    setCrop(undefined);
-    setCompletedCrop(null);
-  }, [transformedImages]);
+  }, [imageModal.imageUrl, transformedImages, imageHistory]);
 
   const handleReset = useCallback(() => {
     setSelectedImages([]);
@@ -405,9 +432,10 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
 
     // 크롭된 이미지를 새로운 결과로 추가
     if (transformedImages.length > 0) {
-      setImageHistory(prev => [...transformedImages, ...prev]);
+      setImageHistory(prev => [transformedImages, ...prev]);
     }
     setTransformedImages([croppedImageUrl]);
+    setSelectedResultIndex(0);
     setImageModal(prev => ({ ...prev, imageUrl: croppedImageUrl, isCropping: false }));
     setCrop(undefined);
     setCompletedCrop(null);
@@ -422,6 +450,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
           imagePreviews,
           prompt,
           aspectRatio,
+          imageCount,
           transformedImages,
           imageHistory
         }
@@ -429,7 +458,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     };
 
     return savePreviousModeState;
-  }, [mode, selectedImages, imagePreviews, prompt, aspectRatio, transformedImages, imageHistory]);
+  }, [mode, selectedImages, imagePreviews, prompt, aspectRatio, imageCount, transformedImages, imageHistory]);
 
   useEffect(() => {
     const newState = modeStates[mode];
@@ -437,6 +466,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     setImagePreviews(newState.imagePreviews);
     setPrompt(newState.prompt);
     setAspectRatio(newState.aspectRatio);
+    setImageCount(newState.imageCount);
     setTransformedImages(newState.transformedImages);
     setImageHistory(newState.imageHistory);
     setError(null);
@@ -447,11 +477,9 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       case 'text-to-image':
         return '텍스트 설명으로 새로운 이미지를 생성합니다';
       case 'edit-image':
-        return '기존 이미지를 편집합니다 (배경 변경, 객체 추가/제거 등)';
-      case 'multi-image-composition':
-        return '여러 이미지의 요소들을 합쳐 새로운 장면을 만듭니다';
-      case 'style-transfer':
-        return '1번 이미지의 스타일을 2번 이미지에 적용합니다';
+        return '이미지 편집, 합성, 스타일 전송 등 자유롭게 활용하세요';
+      case 'background-removal':
+        return 'AI로 배경을 자동으로 제거합니다';
       default:
         return '';
     }
@@ -469,24 +497,12 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       case 'edit-image':
         return [
           '배경을 우주로 변경',
-          '사람 제거',
-          '배경 흐리게',
-          '색상을 따뜻하게'
-        ];
-      case 'multi-image-composition':
-        return [
+          '이 이미지를 수채화 스타일로 변환',
           '1번 이미지의 사람을 2번 이미지의 배경에 배치',
-          '1번 이미지의 고양이를 2번 이미지의 소파 위에',
-          '1번 이미지의 드레스를 2번 이미지의 모델이 입게',
-          '1번 이미지의 자동차를 2번 이미지의 도로에'
+          '사람 제거하고 배경만 남겨줘'
         ];
-      case 'style-transfer':
-        return [
-          '1번 이미지의 수채화 스타일로 2번 이미지를 그려줘',
-          '1번 이미지의 따뜻한 색감을 2번 이미지에 적용',
-          '1번 이미지의 패턴을 2번 이미지 옷에 입혀줘',
-          '1번 이미지의 화풍으로 2번 이미지를 변환'
-        ];
+      case 'background-removal':
+        return [];
       default:
         return [];
     }
@@ -495,62 +511,112 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const maxImages = getMaxImages();
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-gradient-to-r from-purple-500 via-purple-600 to-pink-600 text-white p-6 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <span className="text-4xl">🎨</span>
-            <div>
-              <h1 className="text-3xl font-bold">AI 이미지 변환</h1>
-              <p className="text-white/90 text-sm mt-1">Gemini로 이미지 생성, 편집, 합성, 스타일 전송</p>
+    <div className="flex flex-col h-full bg-gray-100">
+      <div className="bg-white border-b border-gray-200 px-6 py-3 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              {[
+                { id: 'text-to-image' as ImageMode, label: '✨ 생성' },
+                { id: 'edit-image' as ImageMode, label: '✏️ 편집' },
+                { id: 'background-removal' as ImageMode, label: '✂️ 누끼' }
+              ].map((modeOption) => (
+                <button
+                  key={modeOption.id}
+                  onClick={() => setMode(modeOption.id)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    mode === modeOption.id
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {modeOption.label}
+                </button>
+              ))}
             </div>
+            <span className="text-xs text-gray-400">{getModeDescription()}</span>
           </div>
-          {onSettingsOpen && (
-            <button
-              onClick={onSettingsOpen}
-              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors duration-200 flex items-center gap-2 backdrop-blur-sm"
-            >
-              <span>⚙️</span>
-              <span>API 설정</span>
-            </button>
-          )}
-        </div>
-
-        <div className="flex gap-2 mb-3">
-          {[
-            { id: 'text-to-image' as ImageMode, icon: '✍️', label: '텍스트→이미지' },
-            { id: 'edit-image' as ImageMode, icon: '✏️', label: '이미지 편집' },
-            { id: 'multi-image-composition' as ImageMode, icon: '🖼️', label: '다중 합성' },
-            { id: 'style-transfer' as ImageMode, icon: '🎭', label: '스타일 전송' }
-          ].map((modeOption) => (
-            <button
-              key={modeOption.id}
-              onClick={() => setMode(modeOption.id)}
-              className={`px-6 py-2.5 rounded-xl font-medium transition-all ${
-                mode === modeOption.id
-                  ? 'bg-white text-purple-600 shadow-lg'
-                  : 'bg-white/20 text-white hover:bg-white/30'
-              }`}
-            >
-              {modeOption.icon} {modeOption.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="bg-white/10 rounded-lg px-4 py-2 text-white/90 text-sm">
-          {getModeDescription()}
+          <div className="flex items-center gap-2">
+            {/* 모델 스위치 */}
+            <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={async () => {
+                  setGeminiModel('gemini-2.5-flash-image');
+                  setActiveModel('gemini-2.5-flash-image');
+                  const settings = await window.electronAPI.getApiSettings();
+                  window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-2.5-flash-image' });
+                }}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                  activeModel === 'gemini-2.5-flash-image'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                2.5 Flash
+              </button>
+              <button
+                onClick={async () => {
+                  setGeminiModel('gemini-3.1-flash-image-preview');
+                  setActiveModel('gemini-3.1-flash-image-preview');
+                  const settings = await window.electronAPI.getApiSettings();
+                  window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-3.1-flash-image-preview' });
+                }}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                  activeModel === 'gemini-3.1-flash-image-preview'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                3.1 Flash
+              </button>
+            </div>
+            {activeModel === 'gemini-3.1-flash-image-preview' && (
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                {(['0.5k', '1k', '2k', '4k'] as const).map((res) => (
+                  <button
+                    key={res}
+                    onClick={async () => {
+                      setOutputResolution(res);
+                      setActiveResolution(res);
+                      const settings = await window.electronAPI.getApiSettings();
+                      window.electronAPI.saveApiSettings({ ...settings, outputResolution: res });
+                    }}
+                    className={`px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                      activeResolution === res
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {res}
+                  </button>
+                ))}
+              </div>
+            )}
+            {onSettingsOpen && (
+              <button
+                onClick={onSettingsOpen}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
+      {mode === 'background-removal' ? (
+        <BackgroundRemoval />
+      ) : (
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-full">
           <div className="space-y-4">
             {mode !== 'text-to-image' && (
-              <div className="bg-white rounded-2xl shadow-lg p-4 border border-gray-200">
-                <h2 className="text-base font-semibold text-gray-800 mb-2 flex items-center space-x-2">
-                  <span>📤</span>
-                  <span>이미지 업로드 {maxImages > 0 && `(${selectedImages.length}/${maxImages})`}</span>
-                </h2>
+              <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-gray-800">📤 이미지 업로드 {maxImages > 0 && <span className="text-gray-400 font-normal">({selectedImages.length}/{maxImages})</span>}</h2>
+                </div>
 
                 <div className="space-y-3">
                   <input
@@ -561,259 +627,495 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                     className="hidden"
                     id="image-upload"
                   />
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <label
                       htmlFor="image-upload"
-                      className="flex-1 flex items-center justify-center h-16 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-all duration-200"
+                      className="flex items-center justify-center h-14 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
                     >
-                      <div className="flex items-center space-x-2">
-                        <span className="text-2xl">🖼️</span>
-                        <span className="text-gray-600 font-medium text-sm">클릭하여 이미지 선택</span>
-                      </div>
+                      <span className="text-gray-500 text-sm">🖼️ 이미지 선택</span>
                     </label>
                     <button
                       onClick={() => setPasteDialogOpen(true)}
-                      className="px-4 h-16 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-all duration-200 flex items-center gap-2"
+                      className="h-14 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
                     >
-                      <span className="text-2xl">📋</span>
-                      <span className="text-gray-600 font-medium text-sm">붙여넣기</span>
+                      <span className="text-gray-500 text-sm">📋 붙여넣기</span>
                     </button>
                   </div>
 
-                  {imagePreviews.length > 0 && (
-                    <div className={`grid ${imagePreviews.length === 1 ? 'grid-cols-1' : imagePreviews.length === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
-                      {imagePreviews.map((preview, index) => (
-                        <div key={index} className="relative group bg-gray-100 rounded-lg border-2 border-gray-200 flex items-center justify-center"
-                          style={{ height: imagePreviews.length === 1 ? '160px' : imagePreviews.length === 2 ? '120px' : '100px' }}
-                        >
-                          <img
-                            src={preview}
-                            alt={`Preview ${index + 1}`}
-                            className="max-w-full max-h-full object-contain rounded-lg"
-                          />
-                          <button
-                            onClick={() => handleRemoveImage(index)}
-                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                          >
-                            ✕
-                          </button>
-                          {/* 이미지 번호 표시 */}
-                          <div className="absolute top-1 left-1 bg-purple-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-md">
-                            {index + 1}
-                          </div>
-                          {/* 스타일 전송 모드: 역할 표시 */}
-                          {mode === 'style-transfer' && (
-                            <div className="absolute bottom-1 left-1 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-                              {index === 0 ? '스타일' : '콘텐츠'}
+                  {imagePreviews.length > 0 && (() => {
+                    const cols = imagePreviews.length === 1 ? 1 : imagePreviews.length === 2 ? 2 : imagePreviews.length <= 4 ? 3 : 4;
+                    const colsClass = cols === 1 ? 'grid-cols-1' : cols === 2 ? 'grid-cols-2' : cols === 3 ? 'grid-cols-3' : 'grid-cols-4';
+                    const hasMore = imagePreviews.length > cols;
+                    const visiblePreviews = (!imagesExpanded && hasMore) ? imagePreviews.slice(0, cols) : imagePreviews;
+
+                    return (
+                      <div>
+                        <div className={`grid ${colsClass} gap-2`}>
+                          {visiblePreviews.map((preview, index) => (
+                            <div
+                              key={index}
+                              draggable={imagePreviews.length > 1}
+                              onDragStart={() => handleDragStart(index)}
+                              onDragOver={(e) => handleDragOver(e, index)}
+                              onDrop={() => handleDrop(index)}
+                              onDragEnd={handleDragEnd}
+                              className={`relative group bg-gray-50 rounded-lg border overflow-hidden flex items-center justify-center transition-all duration-200 ${
+                                dragOverIndex === index ? 'border-gray-900 bg-gray-100 scale-105' :
+                                dragIndex === index ? 'opacity-50 border-gray-300' :
+                                'border-gray-200'
+                              } ${imagePreviews.length > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                              style={{ maxHeight: imagePreviews.length === 1 ? '200px' : '120px' }}
+                            >
+                              <img
+                                src={preview}
+                                alt={`Preview ${index + 1}`}
+                                className="max-w-full max-h-full object-contain pointer-events-none"
+                              />
+                              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Save original image on first edit
+                                    if (!originalImagesRef.current.has(index)) {
+                                      originalImagesRef.current.set(index, preview);
+                                    }
+                                    setMarkupModal({ isOpen: true, index, imageUrl: preview });
+                                  }}
+                                  className="bg-gray-800/80 hover:bg-gray-900 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs backdrop-blur-sm"
+                                  title="마킹 편집"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  onClick={() => handleRemoveImage(index)}
+                                  className="bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <div className="absolute top-1 left-1 bg-gray-800 text-white text-xs font-medium w-5 h-5 rounded-full flex items-center justify-center">
+                                {index + 1}
+                              </div>
+                              {imagePreviews.length > 1 && (
+                                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-gray-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                                  드래그로 순서 변경
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {/* 다중 합성 모드: 번호 라벨 표시 */}
-                          {mode === 'multi-image-composition' && (
-                            <div className="absolute bottom-1 left-1 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-                              {index + 1}번 이미지
-                            </div>
-                          )}
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        {hasMore && (
+                          <button
+                            onClick={() => setImagesExpanded(!imagesExpanded)}
+                            className="w-full mt-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition-colors flex items-center justify-center gap-1"
+                          >
+                            {imagesExpanded ? '▲ 접기' : `▼ ${imagePreviews.length - cols}장 더 보기`}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
 
-            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-800 mb-3 flex items-center space-x-2">
-                <span>✨</span>
-                <span>프롬프트</span>
-              </h2>
+            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-800 mb-2">💬 프롬프트</h2>
 
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={getModeDescription()}
-                className="w-full h-28 px-4 py-3 border-2 border-gray-200 rounded-xl resize-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all duration-200 text-sm"
+                className="w-full h-24 px-3 py-2 border border-gray-200 rounded-lg resize-none focus:border-gray-400 focus:ring-1 focus:ring-gray-200 transition-all text-sm"
               />
 
-              <div className="mt-3 space-y-2">
-                <p className="text-xs text-gray-600 font-semibold">💡 프롬프트 예시:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {getPromptExamples().slice(0, 4).map((example) => (
-                    <button
-                      key={example}
-                      onClick={() => setPrompt(example)}
-                      className="px-2.5 py-1 bg-purple-50 text-purple-700 text-xs rounded-lg hover:bg-purple-100 transition-colors duration-200"
-                    >
-                      {example}
-                    </button>
-                  ))}
-                </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {getPromptExamples().slice(0, 4).map((example) => (
+                  <button
+                    key={example}
+                    onClick={() => setPrompt(example)}
+                    className="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs rounded-md hover:bg-blue-100 transition-colors"
+                  >
+                    {example}
+                  </button>
+                ))}
               </div>
 
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-xs text-gray-600 font-semibold mb-2">📐 비율 선택:</p>
-                <div className="grid grid-cols-7 gap-1.5">
-                  {mode !== 'text-to-image' && (
-                    <button
-                      onClick={() => setAspectRatio('original')}
-                      className={`py-1.5 px-2 rounded-md text-xs font-medium border-2 transition-all duration-200 ${
-                        aspectRatio === 'original'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
-                    >
-                      원본
-                    </button>
+              <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setIsRatioOpen(!isRatioOpen)}
+                    className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <span className="text-gray-400">비율</span>
+                    {(() => {
+                      const [w, h] = aspectRatio.split(':').map(Number);
+                      const isWide = w > h;
+                      const isSquare = w === h;
+                      const rw = isSquare ? 10 : isWide ? 14 : 8;
+                      const rh = isSquare ? 10 : isWide ? 8 : 14;
+                      const rx = (18 - rw) / 2;
+                      const ry = (18 - rh) / 2;
+                      return (
+                        <svg className="w-4 h-4 text-gray-500" viewBox="0 0 18 18" fill="none" stroke="currentColor">
+                          <rect x={rx} y={ry} width={rw} height={rh} rx={1.5} strokeWidth={1.5} />
+                        </svg>
+                      );
+                    })()}
+                    <span>{aspectRatio}</span>
+                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {isRatioOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsRatioOpen(false)} />
+                      <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[140px] max-h-[280px] overflow-y-auto">
+                        <div className="px-3 py-1.5 text-xs text-gray-400 font-medium">Aspect ratio</div>
+                        {(getCurrentModel() === 'gemini-3.1-flash-image-preview'
+                          ? ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '1:4', '4:1', '1:8', '8:1'] as AspectRatio[]
+                          : ['1:1', '3:4', '4:3', '9:16', '16:9', '21:9'] as AspectRatio[]
+                        ).map((ratio) => {
+                          const [w, h] = ratio.split(':').map(Number);
+                          const isWide = w > h;
+                          const isSquare = w === h;
+                          const rw = isSquare ? 10 : isWide ? 14 : 8;
+                          const rh = isSquare ? 10 : isWide ? 8 : 14;
+                          const rx = (18 - rw) / 2;
+                          const ry = (18 - rh) / 2;
+                          const isSelected = aspectRatio === ratio;
+                          return (
+                            <button
+                              key={ratio}
+                              onClick={() => { setAspectRatio(ratio); setIsRatioOpen(false); }}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
+                                isSelected ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              <svg className="w-4 h-4 text-gray-500 shrink-0" viewBox="0 0 18 18" fill="none" stroke="currentColor">
+                                <rect x={rx} y={ry} width={rw} height={rh} rx={1.5} strokeWidth={1.5} />
+                              </svg>
+                              <span className="flex-1 text-left">{ratio}</span>
+                              {isSelected && (
+                                <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
-                  {(['1:1', '3:4', '4:3', '9:16', '16:9', '21:9'] as AspectRatio[]).map((ratio) => (
-                    <button
-                      key={ratio}
-                      onClick={() => setAspectRatio(ratio)}
-                      className={`py-1.5 px-2 rounded-md text-xs font-medium border-2 transition-all duration-200 ${
-                        aspectRatio === ratio
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
-                    >
-                      {ratio}
-                    </button>
-                  ))}
                 </div>
-              </div>
 
-              {/* 스타일 선택 UI - 텍스트→이미지 모드에서만 표시 */}
-              {mode === 'text-to-image' && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <p className="text-xs text-gray-600 font-semibold mb-2">🎨 스타일 선택:</p>
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="h-4 w-px bg-gray-200" />
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400">매수</span>
+                  <div className="flex items-center bg-gray-100 rounded-lg">
                     <button
-                      onClick={() => setImageStyle('photographic')}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border-2 transition-all duration-200 flex items-center gap-2 ${
-                        imageStyle === 'photographic'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
+                      onClick={() => setImageCount(Math.max(1, imageCount - 1))}
+                      disabled={imageCount <= 1}
+                      className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-30 transition-colors"
                     >
-                      <span>📸</span>
-                      <span>사실적 사진</span>
+                      −
                     </button>
+                    <span className="text-xs font-medium text-gray-700 min-w-[28px] text-center">{imageCount}/4</span>
                     <button
-                      onClick={() => setImageStyle('illustration')}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border-2 transition-all duration-200 flex items-center gap-2 ${
-                        imageStyle === 'illustration'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
+                      onClick={() => setImageCount(Math.min(4, imageCount + 1))}
+                      disabled={imageCount >= 4}
+                      className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-30 transition-colors"
                     >
-                      <span>🖌️</span>
-                      <span>일러스트레이션</span>
-                    </button>
-                    <button
-                      onClick={() => setImageStyle('minimalist')}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border-2 transition-all duration-200 flex items-center gap-2 ${
-                        imageStyle === 'minimalist'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
-                    >
-                      <span>⚪</span>
-                      <span>미니멀리스트</span>
-                    </button>
-                    <button
-                      onClick={() => setImageStyle('natural')}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border-2 transition-all duration-200 flex items-center gap-2 ${
-                        imageStyle === 'natural'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-purple-300'
-                      }`}
-                    >
-                      <span>🌿</span>
-                      <span>자연스럽고 캐주얼</span>
+                      +
                     </button>
                   </div>
                 </div>
-              )}
+
+                <div className="h-4 w-px bg-gray-200" />
+
+                <button
+                  onClick={() => setColorTransferOpen(true)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    colorPalette && colorPalette.length > 0
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  {colorPalette && colorPalette.length > 0 ? (
+                    <>
+                      <div className="flex -space-x-0.5">
+                        {colorPalette.slice(0, 4).map((c, i) => (
+                          <div key={i} className="w-2.5 h-2.5 rounded-full border border-white/50" style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                      <span>색감</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                      </svg>
+                      <span>색감</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
             </div>
 
-            <div className="flex space-x-4">
+            <div className="flex gap-2">
               <Button
                 onClick={handleTransform}
                 disabled={!prompt.trim() || isTransforming}
                 loading={isTransforming}
                 variant="primary"
-                className="flex-1 py-3 text-base"
+                className="flex-1 py-2.5 text-sm"
               >
-                {isTransforming ? '처리 중...' : '🎨 생성/변환'}
+                {isTransforming ? '⏳ 처리 중...' : '🎨 생성하기'}
               </Button>
               <Button
                 onClick={handleReset}
                 disabled={isTransforming}
                 variant="secondary"
-                className="px-6 py-3 text-base"
+                className="px-5 py-2.5 text-sm"
               >
                 🔄 초기화
               </Button>
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200 h-full flex flex-col">
-              <h2 className="text-lg font-semibold text-gray-800 mb-3 flex items-center space-x-2">
-                <span>🖼️</span>
-                <span>결과</span>
-                {isTransforming && (
-                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-purple-200 border-t-purple-600 ml-2"></div>
-                )}
-              </h2>
+          <div className="flex flex-col">
+            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col min-h-[400px] sticky top-0">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold text-gray-800">결과</h2>
+                  {transformedImages.length > 1 && (
+                    <span className="text-xs text-gray-400">{selectedResultIndex + 1}/{transformedImages.length}장</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {imageHistory.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          // Load previous generation set
+                          const prevSet = imageHistory[0];
+                          const newHistory = imageHistory.slice(1);
+                          if (transformedImages.length > 0) {
+                            newHistory.push(transformedImages);
+                          }
+                          setImageHistory(newHistory);
+                          setTransformedImages(prevSet);
+                          setSelectedResultIndex(0);
+                        }}
+                        className="px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100 rounded"
+                        title="이전 생성 결과"
+                      >
+                        ◀ 이전
+                      </button>
+                      <span className="text-xs text-gray-400">히스토리 {imageHistory.length}개</span>
+                      <button
+                        onClick={() => {
+                          // Load next (last) generation set from history
+                          const nextSet = imageHistory[imageHistory.length - 1];
+                          const newHistory = imageHistory.slice(0, -1);
+                          if (transformedImages.length > 0) {
+                            newHistory.unshift(transformedImages);
+                          }
+                          setImageHistory(newHistory);
+                          setTransformedImages(nextSet);
+                          setSelectedResultIndex(0);
+                        }}
+                        className="px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100 rounded"
+                        title="다음 생성 결과"
+                      >
+                        다음 ▶
+                      </button>
+                    </div>
+                  )}
+                  {isTransforming && (
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-200 border-t-gray-600"></div>
+                  )}
+                </div>
+              </div>
 
               <div className="flex-1 flex flex-col">
                 {error && (
-                  <div className="p-3 bg-red-50 border-2 border-red-200 rounded-xl">
-                    <div className="flex items-start space-x-2">
-                      <span className="text-xl">❌</span>
-                      <div>
-                        <h3 className="font-semibold text-red-800 mb-0.5 text-sm">오류 발생</h3>
-                        <p className="text-xs text-red-700">{error}</p>
-                      </div>
-                    </div>
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs text-red-700">{error}</p>
                   </div>
                 )}
 
                 {transformedImages.length === 0 && !error && (
-                  <div className="flex flex-col items-center justify-center flex-1 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
-                    <span className="text-5xl mb-3">✨</span>
-                    <p className="text-gray-600 font-medium text-sm">결과가 여기에 표시됩니다</p>
+                  <div className="flex flex-col items-center justify-center flex-1 bg-gray-50 rounded-lg border border-dashed border-gray-200 py-16">
+                    <span className="text-4xl mb-2">🎨</span>
+                    <p className="text-gray-400 text-sm">프롬프트를 입력하고 생성해보세요</p>
                   </div>
                 )}
 
-                {transformedImages.map((image, index) => (
-                  <div key={index} className="space-y-3 flex flex-col items-center">
-                    <div
-                      className="relative cursor-pointer group max-w-full max-h-[500px] flex items-center justify-center"
-                      onClick={() => openImageModal(image)}
-                    >
-                      <img
-                        src={image}
-                        alt={`Result ${index + 1}`}
-                        className="max-w-full max-h-[500px] object-contain rounded-xl shadow-lg"
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-xl">
-                        <div className="text-white text-center">
-                          <div className="text-4xl mb-2">🔍</div>
-                          <div className="text-sm font-medium">자세히 보기</div>
+                {transformedImages.length > 0 && (
+                  <div className="flex gap-3">
+                    {/* Thumbnails (only show when multiple images) */}
+                    {transformedImages.length > 1 && (
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        {transformedImages.map((image, index) => (
+                          <div
+                            key={index}
+                            onClick={() => setSelectedResultIndex(index)}
+                            className={`relative w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
+                              selectedResultIndex === index
+                                ? 'border-gray-800 shadow-md scale-105'
+                                : 'border-gray-200 hover:border-gray-400'
+                            }`}
+                          >
+                            <img
+                              src={image}
+                              alt={`Result ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] text-center py-0.5">
+                              {index + 1}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Main preview */}
+                    <div className="flex-1 flex flex-col">
+                      <div
+                        className="relative cursor-pointer group max-w-full max-h-[500px] flex items-center justify-center"
+                        onClick={() => openImageModal(transformedImages[selectedResultIndex])}
+                      >
+                        <img
+                          src={transformedImages[selectedResultIndex]}
+                          alt={`Result ${selectedResultIndex + 1}`}
+                          className="max-w-full max-h-[500px] object-contain rounded-lg"
+                        />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                          <span className="text-white text-sm">클릭하여 확대</span>
+                        </div>
+                      </div>
+
+                      {/* Post-processing actions */}
+                      <div className="mt-3 flex justify-center">
+                        <div className="inline-flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                          {([
+                            { id: 'upscale', icon: '↗', label: 'Upscale' },
+                            { id: 'enhance', icon: '✦', label: 'Enhance', prompt: 'ONLY modify the skin texture in this image — do NOT change anything else. The composition, pose, face shape, expression, hair, clothing, background, lighting, and colors must remain EXACTLY identical pixel-for-pixel. ONLY apply these changes to skin areas: add realistic skin pores, fine lines, subtle wrinkles, and natural micro-imperfections. Replace the smooth/airbrushed/plastic AI look on skin with authentic photographic skin texture. Add natural skin details like tiny moles, subtle redness variation, and visible pore structure. Every non-skin element must be completely untouched.' },
+                            { id: 'relight', icon: '☀', label: 'Relight' },
+                            { id: 'inpaint', icon: '✎', label: 'Inpaint' },
+                            { id: 'angles', icon: '📐', label: 'Angles' },
+                          ] as { id: string; icon: string; label: string; prompt?: string }[]).map((action) => (
+                            <button
+                              key={action.id}
+                              disabled={isTransforming}
+                              onClick={async () => {
+                                // Relight opens modal
+                                if (action.id === 'relight') {
+                                  setRelightOpen(true);
+                                  return;
+                                }
+                                // Inpaint opens modal
+                                if (action.id === 'inpaint') {
+                                  setInpaintOpen(true);
+                                  return;
+                                }
+                                // Angles opens modal
+                                if (action.id === 'angles') {
+                                  setAnglesOpen(true);
+                                  return;
+                                }
+                                setIsTransforming(true);
+                                setError(null);
+                                try {
+                                  const currentImage = transformedImages[selectedResultIndex];
+                                  let result: string;
+                                  if (action.id === 'upscale') {
+                                    result = await generateImage(
+                                      'Reproduce this exact image with maximum fidelity. Keep every detail, color, composition, and style identical.',
+                                      { aspectRatio, referenceImage: currentImage, overrideResolution: '4K', overrideModel: 'gemini-3.1-flash-image-preview' }
+                                    );
+                                  } else {
+                                    result = await generateImage(action.prompt!, {
+                                      aspectRatio,
+                                      referenceImage: currentImage
+                                    });
+                                  }
+                                  if (result) {
+                                    setImageHistory(prev => [transformedImages, ...prev]);
+                                    setTransformedImages([result]);
+                                    setSelectedResultIndex(0);
+                                  }
+                                } catch (err) {
+                                  console.error('후처리 오류:', err);
+                                  setError(err instanceof Error ? err.message : '후처리 중 오류가 발생했습니다.');
+                                } finally {
+                                  setIsTransforming(false);
+                                }
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-white hover:shadow-sm transition-all disabled:opacity-40"
+                            >
+                              <span className="text-sm">{action.icon}</span>
+                              {action.label}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     </div>
-
-                    <div className="text-xs text-gray-600 text-center">
-                      💾 갤러리: {imageHistory.length + 1}개
-                    </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
+
+            {/* Save button below result card */}
+            {transformedImages.length > 0 && (
+              <div className="flex justify-center mt-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const filename = `gemini-${mode}-${Date.now()}.png`;
+                      const filePath = await window.electronAPI.saveImage(
+                        transformedImages[selectedResultIndex], filename
+                      );
+                      if (filePath) {
+                        setSaveDialogState({ isOpen: true, filePath });
+                      }
+                    } catch {
+                      alert('이미지 저장 중 오류가 발생했습니다.');
+                    }
+                  }}
+                  className="px-6 py-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white hover:bg-gray-100 border border-gray-200 rounded-lg transition-colors shadow-sm"
+                >
+                  저장
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+      )}
+
+      {/* Image Markup Modal */}
+      <ImageMarkupModal
+        isOpen={markupModal.isOpen}
+        imageUrl={markupModal.imageUrl}
+        originalImageUrl={originalImagesRef.current.get(markupModal.index)}
+        onClose={() => setMarkupModal({ isOpen: false, index: -1, imageUrl: '' })}
+        onSave={(markedDataUrl) => {
+          const idx = markupModal.index;
+          // Update preview
+          setImagePreviews(prev => prev.map((p, i) => i === idx ? markedDataUrl : p));
+          // Update file (convert dataUrl to File)
+          fetch(markedDataUrl).then(r => r.blob()).then(blob => {
+            const file = new File([blob], `marked-${Date.now()}.png`, { type: 'image/png' });
+            setSelectedImages(prev => prev.map((f, i) => i === idx ? file : f));
+          });
+          setMarkupModal({ isOpen: false, index: -1, imageUrl: '' });
+        }}
+      />
 
       {/* Image Paste Dialog */}
       <ImagePasteDialog
@@ -823,6 +1125,108 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       />
 
       {/* Save Success Dialog */}
+      <RelightModal
+        isOpen={relightOpen}
+        imageUrl={transformedImages[selectedResultIndex] || ''}
+        onClose={() => setRelightOpen(false)}
+        isProcessing={isTransforming}
+        onApply={async (relightPrompt) => {
+          setIsTransforming(true);
+          setError(null);
+          try {
+            const currentImage = transformedImages[selectedResultIndex];
+            const result = await generateImage(relightPrompt, {
+              aspectRatio,
+              referenceImage: currentImage
+            });
+            if (result) {
+              setImageHistory(prev => [transformedImages, ...prev]);
+              setTransformedImages([result]);
+              setSelectedResultIndex(0);
+            }
+            setRelightOpen(false);
+          } catch (err) {
+            console.error('Relight 오류:', err);
+            setError(err instanceof Error ? err.message : 'Relight 처리 중 오류가 발생했습니다.');
+          } finally {
+            setIsTransforming(false);
+          }
+        }}
+      />
+
+      <InpaintModal
+        isOpen={inpaintOpen}
+        imageUrl={transformedImages[selectedResultIndex] || ''}
+        onClose={() => setInpaintOpen(false)}
+        isProcessing={isTransforming}
+        onApply={async (inpaintPrompt, originalDataUrl, maskedDataUrl, refImage) => {
+          setIsTransforming(true);
+          setError(null);
+          try {
+            // Image 1: clean original, Image 2: same image with yellow-green mask overlay, Image 3: reference (optional)
+            const referenceImages = [originalDataUrl, maskedDataUrl];
+            if (refImage) referenceImages.push(refImage);
+            const userPrompt = inpaintPrompt.trim()
+              ? inpaintPrompt
+              : (refImage
+                ? 'Replace the highlighted area with what is shown in the reference image, naturally blending it into the scene.'
+                : 'Naturally remove or clean up the highlighted area, filling it seamlessly with the surrounding context.');
+            const fullPrompt = `The first image is the original. The second image is the same image with yellow-green highlighted areas marking the regions to edit. ${userPrompt}. Only modify the highlighted/marked areas and keep everything else identical.${refImage ? ' Use the third reference image as visual guidance for what to place in the marked area.' : ''}`;
+            const result = await generateImage(fullPrompt, {
+              aspectRatio,
+              referenceImages
+            });
+            if (result) {
+              setImageHistory(prev => [transformedImages, ...prev]);
+              setTransformedImages([result]);
+              setSelectedResultIndex(0);
+            }
+            setInpaintOpen(false);
+          } catch (err) {
+            console.error('Inpaint 오류:', err);
+            setError(err instanceof Error ? err.message : 'Inpaint 처리 중 오류가 발생했습니다.');
+          } finally {
+            setIsTransforming(false);
+          }
+        }}
+      />
+
+      <AnglesModal
+        isOpen={anglesOpen}
+        imageUrl={transformedImages[selectedResultIndex] || ''}
+        onClose={() => setAnglesOpen(false)}
+        isProcessing={isTransforming}
+        onApply={async (anglesPrompt) => {
+          setIsTransforming(true);
+          setError(null);
+          try {
+            const currentImage = transformedImages[selectedResultIndex];
+            const result = await generateImage(anglesPrompt, {
+              aspectRatio,
+              referenceImage: currentImage
+            });
+            if (result) {
+              setImageHistory(prev => [transformedImages, ...prev]);
+              setTransformedImages([result]);
+              setSelectedResultIndex(0);
+            }
+            setAnglesOpen(false);
+          } catch (err) {
+            console.error('Angles 오류:', err);
+            setError(err instanceof Error ? err.message : 'Angles 처리 중 오류가 발생했습니다.');
+          } finally {
+            setIsTransforming(false);
+          }
+        }}
+      />
+
+      <ColorTransferModal
+        isOpen={colorTransferOpen}
+        onClose={() => setColorTransferOpen(false)}
+        onApply={(palette) => setColorPalette(palette.length > 0 ? palette : null)}
+        currentPalette={colorPalette}
+      />
+
       <SaveSuccessDialog
         isOpen={saveDialogState.isOpen}
         filePath={saveDialogState.filePath}
@@ -928,43 +1332,46 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                   </button>
                   <button
                     onClick={() => {
-                      // 현재 이미지를 transformedImages와 imageHistory에서 제거
                       const currentImageUrl = imageModal.imageUrl;
 
-                      // transformedImages에서 제거
+                      // Remove from current set
                       const newTransformedImages = transformedImages.filter(img => img !== currentImageUrl);
                       setTransformedImages(newTransformedImages);
 
-                      // imageHistory에서 제거
-                      const newImageHistory = imageHistory.filter(img => img !== currentImageUrl);
+                      // Remove from history sets (filter out empty sets)
+                      const newImageHistory = imageHistory
+                        .map(set => set.filter(img => img !== currentImageUrl))
+                        .filter(set => set.length > 0);
                       setImageHistory(newImageHistory);
 
-                      // 다른 이미지가 있으면 첫 번째 이미지로 전환, 없으면 모달 닫기
                       if (newTransformedImages.length > 0) {
+                        setSelectedResultIndex(0);
                         setImageModal({ isOpen: true, imageUrl: newTransformedImages[0], isCropping: false });
                       } else if (newImageHistory.length > 0) {
-                        setImageModal({ isOpen: true, imageUrl: newImageHistory[0], isCropping: false });
-                        setTransformedImages([newImageHistory[0]]);
+                        const nextSet = newImageHistory[0];
+                        setTransformedImages(nextSet);
                         setImageHistory(newImageHistory.slice(1));
+                        setSelectedResultIndex(0);
+                        setImageModal({ isOpen: true, imageUrl: nextSet[0], isCropping: false });
                       } else {
                         closeImageModal();
                       }
                     }}
                     className="bg-red-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-red-700"
                   >
-                    🗑️ 이 이미지 삭제
+                    이 이미지 삭제
                   </button>
                 </>
               )}
             </div>
 
             {!imageModal.isCropping && (() => {
-              const allImages = [imageModal.imageUrl, ...imageHistory.filter(url => url !== imageModal.imageUrl)];
+              const allImages = [...transformedImages, ...imageHistory.flat()];
 
               return allImages.length > 1 && (
                 <div className="bg-black bg-opacity-75 rounded-lg p-3 mt-4 w-full max-w-[85vw]">
                   <div className="text-white text-sm mb-2 text-center">
-                    📸 이미지 갤러리 ({allImages.length}개)
+                    이미지 갤러리 ({allImages.length}개)
                   </div>
                   <div
                     className="flex gap-2 overflow-x-auto pb-2 px-1"
@@ -975,10 +1382,13 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                         key={index}
                         className={`relative flex-shrink-0 cursor-pointer rounded-lg overflow-hidden border-2 transition-all duration-200 ${
                           imageUrl === imageModal.imageUrl
-                            ? 'border-blue-500 scale-105 shadow-md'
+                            ? 'border-gray-100 scale-105 shadow-md'
                             : 'border-gray-500 scale-100 hover:border-gray-400'
                         }`}
-                        onClick={() => selectImageFromGallery(imageUrl)}
+                        onClick={() => {
+                          // Just switch the displayed image, don't rearrange
+                          setImageModal(prev => ({ ...prev, imageUrl }));
+                        }}
                       >
                         <img
                           src={imageUrl}
@@ -986,8 +1396,8 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                           className="w-16 h-16 object-cover"
                         />
                         {imageUrl === imageModal.imageUrl && (
-                          <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
-                            <div className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded">
+                          <div className="absolute inset-0 bg-white bg-opacity-20 flex items-center justify-center">
+                            <div className="bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded">
                               현재
                             </div>
                           </div>

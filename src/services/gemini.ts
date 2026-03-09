@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { GeminiModel, OutputResolution } from '../types/global';
 
 let genAI: GoogleGenerativeAI | null = null;
-let currentModel: GeminiModel = 'gemini-2.5-flash-image-preview';
+let currentModel: GeminiModel = 'gemini-2.5-flash-image';
 let currentResolution: OutputResolution = '1k';
 
 export const initializeGemini = (apiKey: string) => {
@@ -33,7 +33,8 @@ export const generateImage = async (
     aspectRatio?: string | null;
     referenceImage?: string;
     referenceImages?: string[];
-    style?: 'photographic' | 'illustration' | 'minimalist' | 'natural';
+    overrideResolution?: string;
+    overrideModel?: string;
   }
 ): Promise<string> => {
   if (!genAI) {
@@ -41,32 +42,18 @@ export const generateImage = async (
   }
 
   const maxRetries = 2;
+  const useModel = options?.overrideModel || currentModel;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🟡 ${currentModel} 이미지 생성 시작 (${attempt}/${maxRetries})`);
+      console.log(`🟡 ${useModel} 이미지 생성 시작 (${attempt}/${maxRetries})`);
 
       // 프롬프트 향상
       let enhancedPrompt = prompt;
 
-      // 참고 이미지가 있는 경우: 프롬프트를 그대로 사용
+      // 참고 이미지가 있는 경우 로그만 출력
       if (options?.referenceImage || options?.referenceImages) {
-        console.log('📸 참고 이미지 기반 재가공 모드 - 프롬프트 그대로 사용');
-        enhancedPrompt = prompt;
-      } else {
-        // 스타일 옵션 처리
-        const style = options?.style || 'photographic';
-        if (style === 'photographic') {
-          enhancedPrompt = `A photorealistic photograph of ${prompt}. Captured with professional studio lighting setup using three-point softbox lighting. High-resolution commercial photography with sharp details and natural colors. Professional quality with perfect exposure and composition.`;
-        } else if (style === 'illustration') {
-          enhancedPrompt = `A professional digital illustration of ${prompt}. Clean and detailed artwork with vibrant colors and smooth shading. Modern illustration style suitable for editorial or blog content. High-quality digital art with polished composition.`;
-        } else if (style === 'minimalist') {
-          enhancedPrompt = `A minimalist composition featuring ${prompt}. Clean design with simple shapes and negative space. Limited color palette with focus on essential elements. Modern and elegant aesthetic with balanced composition.`;
-        } else if (style === 'natural') {
-          enhancedPrompt = `A natural and casual scene of ${prompt}. Soft natural lighting with warm and inviting atmosphere. Authentic and relatable composition that feels comfortable and approachable. Real-life everyday aesthetic with genuine feeling.`;
-        }
-
-        console.log(`🎨 스타일: ${style}, 향상된 프롬프트: "${enhancedPrompt}"`);
+        console.log('📸 참고 이미지 기반 재가공 모드');
       }
 
       // API 요청 body parts 구성
@@ -132,10 +119,16 @@ export const generateImage = async (
         console.log(`📐 Aspect Ratio 설정: ${options.aspectRatio}`);
       }
 
-      // Pro 모델일 때 해상도 설정 추가 (대문자 K 필수)
-      if (currentModel === 'gemini-3-pro-image-preview' && currentResolution !== '1k') {
-        imageConfig.imageSize = currentResolution === '4k' ? '4K' : '2K';
-        console.log(`🖼️ 출력 해상도 설정: ${imageConfig.imageSize}`);
+      // 해상도 설정: overrideResolution 우선, 없으면 현재 설정 사용
+      if (useModel === 'gemini-3.1-flash-image-preview') {
+        const sizeMap: Record<string, string> = { '0.5k': '0.5K', '1k': '1K', '2k': '2K', '4k': '4K' };
+        if (options?.overrideResolution) {
+          imageConfig.imageSize = options.overrideResolution;
+          console.log(`🖼️ 출력 해상도 오버라이드: ${imageConfig.imageSize}`);
+        } else if (currentResolution !== '1k') {
+          imageConfig.imageSize = sizeMap[currentResolution];
+          console.log(`🖼️ 출력 해상도 설정: ${imageConfig.imageSize}`);
+        }
       }
 
       // imageConfig가 비어있지 않으면 generationConfig에 추가
@@ -157,7 +150,7 @@ export const generateImage = async (
 
       const apiKey = (genAI as any).apiKey;
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${useModel}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: {

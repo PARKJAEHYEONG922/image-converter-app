@@ -14,32 +14,25 @@ interface TestStatus {
   message: string;
 }
 
-// 사용 가능한 Gemini 이미지 생성 모델 목록
 const GEMINI_MODELS: GeminiModelInfo[] = [
   {
     id: 'gemini-2.5-flash-image',
-    name: 'Gemini 2.5 Flash Image (안정)',
-    description: '안정 버전 - 빠르고 효율적인 이미지 생성 (1K 해상도)',
+    name: 'Gemini 2.5 Flash Image',
+    description: '안정 버전 - 빠르고 효율적인 이미지 생성',
     tier: 'flash'
   },
   {
-    id: 'gemini-2.5-flash-image-preview',
-    name: 'Gemini 2.5 Flash Image Preview (Nano Banana 🍌)',
-    description: '프리뷰 버전 - 기존에 사용하던 모델, 이미지 생성/편집 특화',
+    id: 'gemini-3.1-flash-image-preview',
+    name: 'Gemini 3.1 Flash Image',
+    description: '최신 모델 - 고효율, 확장된 비율 지원, 고급 이미지 생성',
     tier: 'flash'
-  },
-  {
-    id: 'gemini-3-pro-image-preview',
-    name: 'Gemini 3.0 Pro Image (최신 🔥)',
-    description: '최신 Pro 모델 - 고해상도(4K), 최대 14개 참조 이미지, 고급 기능',
-    tier: 'pro'
   }
 ];
 
 const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [savedApiKey, setSavedApiKey] = useState('');
-  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash-image-preview');
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash-image');
   const [outputResolution, setOutputResolution] = useState<OutputResolution>('1k');
   const [testStatus, setTestStatus] = useState<TestStatus>({
     testing: false,
@@ -70,6 +63,7 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
         setOutputResolution(settings.outputResolution);
         setGeminiResolution(settings.outputResolution);
       }
+
     } catch (error) {
       console.error('설정 로드 실패:', error);
     }
@@ -77,410 +71,268 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
 
   const testAndApplyApiKey = async () => {
     if (!apiKey.trim()) {
-      setTestStatus({
-        testing: false,
-        success: false,
-        message: 'API 키를 입력해주세요.'
-      });
+      setTestStatus({ testing: false, success: false, message: 'API 키를 입력해주세요.' });
       return;
     }
 
-    setTestStatus({
-      testing: true,
-      success: false,
-      message: 'Gemini API를 테스트하는 중...'
-    });
+    setTestStatus({ testing: true, success: false, message: 'API 테스트 중...' });
 
     try {
-      // API 키 테스트
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
+        { method: 'GET', headers: { 'Content-Type': 'application/json' } }
       );
 
       if (response.ok) {
-        // 테스트 성공 시 저장
         await window.electronAPI.saveApiSettings({
           geminiApiKey: apiKey.trim(),
           geminiModel: selectedModel,
-          outputResolution: outputResolution
+          outputResolution: outputResolution,
         });
-
-        // Gemini 초기화
         initializeGemini(apiKey.trim());
         setGeminiModel(selectedModel);
         setGeminiResolution(outputResolution);
         setSavedApiKey(apiKey.trim());
-
-        setTestStatus({
-          testing: false,
-          success: true,
-          message: '✅ API 키가 성공적으로 적용되었습니다.'
-        });
-
-        // 3초 후 메시지 숨기기
-        setTimeout(() => {
-          setTestStatus(prev => ({ ...prev, message: '' }));
-        }, 3000);
+        setTestStatus({ testing: false, success: true, message: 'API 키가 적용되었습니다.' });
+        setTimeout(() => setTestStatus(prev => ({ ...prev, message: '' })), 3000);
       } else {
         const errorData = await response.json().catch(() => ({}));
         setTestStatus({
-          testing: false,
-          success: false,
-          message: `❌ API 키 확인 필요: ${errorData.error?.message || `HTTP ${response.status}`}`
+          testing: false, success: false,
+          message: `API 키 확인 필요: ${errorData.error?.message || `HTTP ${response.status}`}`
         });
       }
-    } catch (error) {
-      setTestStatus({
-        testing: false,
-        success: false,
-        message: '❌ 연결 실패: 네트워크 오류가 발생했습니다.'
-      });
+    } catch {
+      setTestStatus({ testing: false, success: false, message: '네트워크 오류가 발생했습니다.' });
     }
   };
 
   const deleteApiKey = async () => {
     try {
-      await window.electronAPI.saveApiSettings({
-        geminiApiKey: ''
-      });
+      await window.electronAPI.saveApiSettings({ geminiApiKey: '' });
       setApiKey('');
       setSavedApiKey('');
-      setTestStatus({
-        testing: false,
-        success: true,
-        message: 'API 키가 삭제되었습니다.'
-      });
-      setTimeout(() => {
-        setTestStatus(prev => ({ ...prev, message: '' }));
-      }, 3000);
-    } catch (error) {
-      setTestStatus({
-        testing: false,
-        success: false,
-        message: 'API 키 삭제에 실패했습니다.'
-      });
+      setTestStatus({ testing: false, success: true, message: 'API 키가 삭제되었습니다.' });
+      setTimeout(() => setTestStatus(prev => ({ ...prev, message: '' })), 3000);
+    } catch {
+      setTestStatus({ testing: false, success: false, message: 'API 키 삭제에 실패했습니다.' });
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 rounded-2xl w-[800px] max-h-[90vh] overflow-hidden border border-gray-700 shadow-2xl">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl w-[520px] max-h-[85vh] overflow-hidden shadow-2xl border border-gray-200"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-6">
-          <h2 className="text-2xl font-bold text-white">이미지 AI 설정</h2>
-          <p className="text-purple-100 mt-1">Gemini API를 설정하여 이미지 생성 기능을 활성화하세요</p>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">API 설정</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Gemini API 키와 모델을 설정합니다</p>
+          </div>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+            ✕
+          </button>
         </div>
 
-        <div className="p-8 overflow-y-auto max-h-[calc(90vh-200px)]">
-          {/* Current Settings Display */}
-          <div className="p-5 bg-gradient-to-br from-purple-900/30 to-pink-900/30 border border-purple-700 rounded-2xl mb-6">
-            <h4 className="font-semibold text-sm text-purple-300 mb-3 flex items-center space-x-2">
-              <span>⚙️</span>
-              <span>현재 적용된 설정</span>
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div>
-                <span className="text-gray-400 block mb-1">제공자</span>
-                <span className="font-semibold text-purple-300">GEMINI</span>
-              </div>
-              <div>
-                <span className="text-gray-400 block mb-1">모델</span>
-                <span className="font-semibold text-purple-300">
-                  {GEMINI_MODELS.find(m => m.id === selectedModel)?.name || 'Gemini 2.5 Flash Image'}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-400 block mb-1">API 키</span>
-                <div className={`flex items-center space-x-1 font-semibold ${
-                  savedApiKey ? 'text-emerald-400' : 'text-red-400'
-                }`}>
-                  <span>{savedApiKey ? '🔑' : '🔒'}</span>
-                  <span>{savedApiKey ? '설정됨' : '미설정'}</span>
+        <div className="p-6 overflow-y-auto max-h-[calc(85vh-130px)] space-y-5">
+          {/* Status bar */}
+          <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">상태</span>
+              <span className={`font-medium ${savedApiKey ? 'text-green-600' : 'text-gray-400'}`}>
+                {savedApiKey ? '연결됨' : '미설정'}
+              </span>
+            </div>
+            <div className="h-3 w-px bg-gray-200" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">모델</span>
+              <span className="font-medium text-gray-700">
+                {selectedModel === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
+              </span>
+            </div>
+            {selectedModel === 'gemini-3.1-flash-image-preview' && (
+              <>
+                <div className="h-3 w-px bg-gray-200" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-400">해상도</span>
+                  <span className="font-medium text-gray-700">{outputResolution}</span>
                 </div>
+              </>
+            )}
+          </div>
+
+          {/* API Key */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">API Key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:border-gray-400 focus:ring-1 focus:ring-gray-200 transition-all"
+              placeholder="AIza..."
+            />
+          </div>
+
+          {/* Model */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">모델</label>
+            <div className="flex gap-2">
+              {GEMINI_MODELS.map((model) => (
+                <button
+                  key={model.id}
+                  onClick={() => setSelectedModel(model.id)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                    selectedModel === model.id
+                      ? 'bg-gray-800 text-white border-gray-800'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  {model.id === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {GEMINI_MODELS.find(m => m.id === selectedModel)?.description}
+            </p>
+          </div>
+
+          {/* Resolution (3.1 Flash only) */}
+          {selectedModel === 'gemini-3.1-flash-image-preview' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">출력 해상도</label>
+              <div className="flex gap-1.5">
+                {(['0.5k', '1k', '2k', '4k'] as OutputResolution[]).map((res) => (
+                  <button
+                    key={res}
+                    onClick={() => setOutputResolution(res)}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      outputResolution === res
+                        ? 'bg-gray-800 text-white border-gray-800'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    {res}
+                  </button>
+                ))}
               </div>
-              <div>
-                <span className="text-gray-400 block mb-1">연결 상태</span>
-                <div className={`flex items-center space-x-1 font-semibold ${
-                  testStatus.testing
-                    ? 'text-blue-400'
-                    : testStatus.success || savedApiKey
-                    ? 'text-emerald-400'
-                    : testStatus.message && !testStatus.success
-                    ? 'text-red-400'
-                    : 'text-gray-500'
-                }`}>
-                  <span>
-                    {testStatus.testing
-                      ? '🔄'
-                      : testStatus.success || savedApiKey
-                      ? '✅'
-                      : testStatus.message && !testStatus.success
-                      ? '❌'
-                      : '⚪'}
-                  </span>
-                  <span>
-                    {testStatus.testing
-                      ? '테스트 중...'
-                      : testStatus.success || savedApiKey
-                      ? '연결됨'
-                      : testStatus.message && !testStatus.success
-                      ? '연결 실패'
-                      : '미확인'}
-                  </span>
-                </div>
-              </div>
+              <p className="text-xs text-gray-400 mt-1">해상도가 높을수록 생성 시간이 증가합니다</p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={deleteApiKey}
+              disabled={testStatus.testing || !apiKey}
+              className="px-3 py-2 text-xs text-red-500 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-40"
+            >
+              삭제
+            </button>
+            <Button
+              onClick={testAndApplyApiKey}
+              disabled={!apiKey || testStatus.testing}
+              loading={testStatus.testing}
+              variant={testStatus.success ? "success" : "primary"}
+              size="sm"
+              className="flex-1"
+            >
+              {testStatus.testing ? '테스트 중...' : testStatus.success ? '적용 완료' : '테스트 및 적용'}
+            </Button>
+          </div>
+
+          {/* Status message */}
+          {testStatus.message && (
+            <div className={`p-3 rounded-lg text-xs font-medium ${
+              testStatus.success
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : testStatus.testing
+                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {testStatus.message}
+            </div>
+          )}
+
+          {/* Cost Info */}
+          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <p className="text-xs font-medium text-gray-600 mb-1.5">비용 정보</p>
+            <div className="text-xs text-gray-500 space-y-0.5">
+              <div>이미지 1장당 약 $0.039 (1290 토큰)</div>
+              <div>GCP 신규 가입 시 $300 크레딧 = 약 7,600장 생성 가능</div>
             </div>
           </div>
 
-          {/* Gemini API Settings */}
-          <div className="space-y-6">
-            <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 rounded-xl p-6 border border-gray-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                    <span className="text-white text-lg font-bold">G</span>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">Google Gemini</h3>
-                    <p className="text-sm text-gray-400">이미지 생성 및 편집</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    API Key
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="password"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      className="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                      placeholder="AIza..."
-                    />
-                  </div>
-                </div>
-
-                {/* 모델 선택 드롭다운 */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    모델 선택
-                  </label>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value as GeminiModel)}
-                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all cursor-pointer"
-                  >
-                    {GEMINI_MODELS.map((model) => (
-                      <option key={model.id} value={model.id} className="bg-gray-800">
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                  {/* 선택된 모델 설명 */}
-                  <div className="mt-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                    <p className="text-sm text-gray-400">
-                      {GEMINI_MODELS.find(m => m.id === selectedModel)?.description}
-                    </p>
-                    {GEMINI_MODELS.find(m => m.id === selectedModel)?.tier === 'pro' && (
-                      <p className="text-xs text-emerald-400 mt-1">
-                        ✨ Pro 모델 - 더 높은 품질과 고급 기능 제공
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* 해상도 선택 (Pro 모델 전용) */}
-                {selectedModel === 'gemini-3-pro-image-preview' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      출력 해상도
-                    </label>
-                    <select
-                      value={outputResolution}
-                      onChange={(e) => setOutputResolution(e.target.value as OutputResolution)}
-                      className="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all cursor-pointer"
-                    >
-                      <option value="1k" className="bg-gray-800">1K (기본)</option>
-                      <option value="2k" className="bg-gray-800">2K (고해상도)</option>
-                      <option value="4k" className="bg-gray-800">4K (최고 해상도)</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      해상도가 높을수록 생성 시간과 비용이 증가합니다
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex gap-3">
-                  <Button
-                    onClick={deleteApiKey}
-                    disabled={testStatus.testing || !apiKey}
-                    variant="danger"
-                    size="sm"
-                    className="inline-flex items-center space-x-2"
-                  >
-                    <span>🗑️</span>
-                    <span>삭제</span>
-                  </Button>
-
-                  <Button
-                    onClick={testAndApplyApiKey}
-                    disabled={!apiKey || testStatus.testing}
-                    loading={testStatus.testing}
-                    variant={testStatus.success ? "success" : "primary"}
-                    size="sm"
-                    className="flex-1 inline-flex items-center justify-center space-x-2"
-                  >
-                    {!testStatus.testing && (
-                      <span>{testStatus.success ? '✅' : '🧪'}</span>
-                    )}
-                    <span>
-                      {testStatus.testing
-                        ? '테스트 중...'
-                        : testStatus.success
-                        ? '적용 완료'
-                        : '테스트 및 적용'}
-                    </span>
-                  </Button>
-                </div>
-
-                {/* Test Result Message */}
-                {testStatus.message && (
-                  <div className={`p-4 rounded-xl border-2 ${
-                    testStatus.success
-                      ? 'bg-green-900/20 border-green-500/30 text-green-400'
-                      : testStatus.testing
-                      ? 'bg-blue-900/20 border-blue-500/30 text-blue-400'
-                      : 'bg-red-900/20 border-red-500/30 text-red-400'
-                  }`}>
-                    <p className="text-sm font-medium m-0">
-                      {testStatus.message}
-                    </p>
-                  </div>
-                )}
-
-                {/* Cost Info */}
-                <div className="bg-green-900/20 border border-green-500/30 rounded-xl p-4 mt-4">
-                  <div className="text-sm text-green-400 space-y-1">
-                    <div className="font-semibold mb-2 flex items-center space-x-2">
-                      <span>🍌</span>
-                      <span>Nano Banana (Gemini 2.5 Flash Image) 정보</span>
-                    </div>
-                    <div><strong>• 가격:</strong> $0.039/이미지 (1290 토큰)</div>
-                    <div><strong>• 모델:</strong> Gemini 2.5 Flash Image</div>
-                    <div><strong>• 별명:</strong> Nano Banana 🍌</div>
-                    <div><strong>✨ 특징:</strong> 캐릭터 일관성, 다중 이미지 합성, 자연어 변환</div>
-                    <div><strong>📐 비율:</strong> 10가지 지원 (1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9)</div>
-                    <div><strong>🏆 평가:</strong> LMArena 세계 1위 이미지 편집 모델</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* API Key Guide */}
-            <div className="bg-gray-800/30 rounded-xl p-1">
-              <button
-                onClick={() => setIsGuideOpen(!isGuideOpen)}
-                className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-gray-700/30 rounded-lg transition-colors"
+          {/* Guide */}
+          <div className="border border-gray-100 rounded-lg">
+            <button
+              onClick={() => setIsGuideOpen(!isGuideOpen)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 rounded-lg transition-colors"
+            >
+              <span className="text-xs font-medium text-gray-600">API 키 발급 방법</span>
+              <svg
+                className={`w-4 h-4 text-gray-400 transition-transform ${isGuideOpen ? 'rotate-90' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
               >
-                <span className="font-medium text-gray-300 flex items-center space-x-2">
-                  <span>📝</span>
-                  <span>Gemini API 키 발급 방법</span>
-                </span>
-                <svg
-                  className={`w-5 h-5 text-gray-400 transition-transform ${isGuideOpen ? 'rotate-90' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
 
-              {isGuideOpen && (
-                <div className="px-5 pb-5 space-y-3">
-                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-3">
-                    <div className="text-blue-400 text-sm space-y-1">
-                      <div className="font-semibold flex items-center space-x-2">
-                        <span>🎁</span>
-                        <span>무료 사용 혜택</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="font-semibold text-blue-300">GCP $300 무료 크레딧 활용 (추천 ⭐)</div>
-                        <div>• <strong>신규 가입 시:</strong> $300 무료 크레딧 (90일)</div>
-                        <div>• <strong>카드 등록:</strong> 결제 수단 등록 필요 (90일 후 자동 과금 없음)</div>
-                        <div>• <strong>설정 방법:</strong>
-                          <div className="ml-4 mt-1 space-y-0.5 text-xs">
-                            <div>1. <a href="https://cloud.google.com/free" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-purple-200 underline" onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://cloud.google.com/free'); }}>GCP 신규 가입</a> (카드 등록)</div>
-                            <div>2. AI Studio → Set up Billing → GCP 계정 연결</div>
-                          </div>
-                        </div>
-                        <div>• <strong>혜택:</strong> $300 크레딧으로 약 <span className="text-yellow-300 font-bold">7,600장</span> 생성 가능</div>
-                        <div>• <strong>이미지 생성 비용:</strong> $0.039/장</div>
-
-                        <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
-                          <div className="text-yellow-400 text-xs">
-                            💡 <strong>중요:</strong> 이미지 생성 API는 무료 티어가 없습니다. GCP $300 크레딧을 사용하면 90일 동안 무료로 사용 가능!
-                          </div>
-                        </div>
-                      </div>
+            {isGuideOpen && (
+              <div className="px-4 pb-4 space-y-3">
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <p className="text-xs font-medium text-blue-700 mb-1">GCP $300 무료 크레딧 (추천)</p>
+                  <div className="text-xs text-blue-600 space-y-0.5">
+                    <div>신규 가입 시 $300 크레딧 (90일)</div>
+                    <div>
+                      <a
+                        href="#"
+                        className="underline hover:text-blue-800"
+                        onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://cloud.google.com/free'); }}
+                      >
+                        GCP 가입
+                      </a>
+                      {' '}후 AI Studio에서 Billing 연결
                     </div>
                   </div>
-
-                  <ol className="list-decimal list-inside space-y-2 ml-2 text-sm text-gray-400">
-                    <li>
-                      <a
-                        href="https://aistudio.google.com/app/apikey"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300 underline"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          window.electronAPI.openExternal('https://aistudio.google.com/app/apikey');
-                        }}
-                      >
-                        Google AI Studio
-                      </a>
-                      {' '}접속
-                    </li>
-                    <li>Google 계정으로 로그인</li>
-                    <li>"Create API Key" 버튼 클릭</li>
-                    <li>새 프로젝트 생성 또는 기존 프로젝트 선택</li>
-                    <li>생성된 API 키 복사</li>
-                    <li>위 입력란에 붙여넣기</li>
-                    <li>"테스트 및 적용" 버튼 클릭</li>
-                  </ol>
-
-                  <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                    <p className="text-yellow-400 text-xs">
-                      ⚠️ API 키는 안전하게 보관하고 공개하지 마세요
-                    </p>
-                  </div>
                 </div>
-              )}
-            </div>
+
+                <ol className="list-decimal list-inside space-y-1.5 text-xs text-gray-500">
+                  <li>
+                    <a
+                      href="#"
+                      className="text-blue-500 hover:text-blue-700 underline"
+                      onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://aistudio.google.com/app/apikey'); }}
+                    >
+                      Google AI Studio
+                    </a>
+                    {' '}접속
+                  </li>
+                  <li>Google 계정으로 로그인</li>
+                  <li>"Create API Key" 클릭</li>
+                  <li>생성된 API 키 복사 후 위에 붙여넣기</li>
+                  <li>"테스트 및 적용" 클릭</li>
+                </ol>
+
+                <div className="p-2 bg-yellow-50 rounded-lg border border-yellow-100">
+                  <p className="text-xs text-yellow-700">API 키는 안전하게 보관하고 공개하지 마세요</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-8 py-4 bg-gray-900/50 border-t border-gray-700 flex justify-end">
-          <Button
+        <div className="px-6 py-3 border-t border-gray-200 flex justify-end">
+          <button
             onClick={onClose}
-            variant="ghost"
-            size="md"
+            className="px-4 py-1.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
           >
             닫기
-          </Button>
+          </button>
         </div>
       </div>
     </div>
