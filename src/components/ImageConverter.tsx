@@ -150,6 +150,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   // Crop states
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
+  const [cropAspect, setCropAspect] = useState<number | undefined>(undefined);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const getMaxImages = () => {
@@ -499,6 +500,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     setImageModal(prev => ({ ...prev, imageUrl: croppedImageUrl, isCropping: false }));
     setCrop(undefined);
     setCompletedCrop(null);
+    setCropAspect(undefined);
   }, [completedCrop, transformedImages]);
 
   useEffect(() => {
@@ -1322,6 +1324,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                   crop={crop}
                   onChange={(c) => setCrop(c)}
                   onComplete={(c) => setCompletedCrop(c)}
+                  aspect={cropAspect}
                   className="max-w-[80vw] max-h-[70vh]"
                 >
                   <img
@@ -1349,25 +1352,54 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
 
             <div className="flex gap-3 justify-center mt-4 z-10">
               {imageModal.isCropping ? (
-                <>
-                  <button
-                    onClick={handleCompleteCrop}
-                    className="bg-green-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-green-700"
-                    disabled={!completedCrop}
-                  >
-                    ✂️ 자르기 완료
-                  </button>
-                  <button
-                    onClick={() => {
-                      setImageModal(prev => ({ ...prev, isCropping: false }));
-                      setCrop(undefined);
-                      setCompletedCrop(null);
-                    }}
-                    className="bg-gray-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-gray-700"
-                  >
-                    취소
-                  </button>
-                </>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="flex gap-2 flex-wrap justify-center">
+                    {([
+                      { label: '자유', value: undefined },
+                      { label: '1:1', value: 1 },
+                      { label: '4:3', value: 4 / 3 },
+                      { label: '3:4', value: 3 / 4 },
+                      { label: '16:9', value: 16 / 9 },
+                      { label: '9:16', value: 9 / 16 },
+                    ] as { label: string; value: number | undefined }[]).map((preset) => (
+                      <button
+                        key={preset.label}
+                        onClick={() => {
+                          setCropAspect(preset.value);
+                          setCrop(undefined);
+                          setCompletedCrop(null);
+                        }}
+                        className={`border-none rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors duration-200 ${
+                          cropAspect === preset.value
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleCompleteCrop}
+                      className="bg-green-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-green-700"
+                      disabled={!completedCrop}
+                    >
+                      ✂️ 자르기 완료
+                    </button>
+                    <button
+                      onClick={() => {
+                        setImageModal(prev => ({ ...prev, isCropping: false }));
+                        setCrop(undefined);
+                        setCompletedCrop(null);
+                        setCropAspect(undefined);
+                      }}
+                      className="bg-gray-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-gray-700"
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <button

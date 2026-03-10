@@ -1007,7 +1007,25 @@ const ImageMarkupModal: React.FC<ImageMarkupModalProps> = ({ isOpen, imageUrl, o
                   ] as { label: string; value: number | null }[]).map(r => (
                     <button
                       key={r.label}
-                      onClick={() => { setCropRatio(r.value); setCropRect(null); }}
+                      onClick={() => {
+                        setCropRatio(r.value);
+                        if (r.value !== null) {
+                          // Auto-create crop rect centered on canvas with the selected ratio
+                          const cw = canvasSize.w;
+                          const ch = canvasSize.h;
+                          let rw: number, rh: number;
+                          if (r.value >= cw / ch) {
+                            rw = cw * 0.8;
+                            rh = rw / r.value;
+                          } else {
+                            rh = ch * 0.8;
+                            rw = rh * r.value;
+                          }
+                          setCropRect({ x: (cw - rw) / 2, y: (ch - rh) / 2, w: rw, h: rh });
+                        } else {
+                          setCropRect(null);
+                        }
+                      }}
                       className={`px-2 py-1 text-[10px] rounded-md transition-all ${
                         cropRatio === r.value ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
                       }`}
