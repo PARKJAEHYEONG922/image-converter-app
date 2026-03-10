@@ -321,7 +321,7 @@ const RelightModal: React.FC<RelightModalProps> = ({
   const indicatorPos = getIndicatorPosition();
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div
         className="bg-white rounded-xl w-[400px] overflow-hidden shadow-2xl border border-gray-200"
         onClick={e => e.stopPropagation()}

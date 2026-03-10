@@ -158,7 +158,7 @@ const ColorTransferModal: React.FC<ColorTransferModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div
         className="bg-white rounded-xl w-[440px] max-h-[85vh] overflow-hidden shadow-2xl border border-gray-200"
         onClick={e => e.stopPropagation()}

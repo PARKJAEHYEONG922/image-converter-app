@@ -185,14 +185,32 @@ const InpaintModal: React.FC<InpaintModalProps> = ({
     // Original image (clean)
     const originalDataUrl = canvas.toDataURL('image/png');
 
-    // Merge original image + mask overlay into one image (for area marking)
-    const mergedCanvas = document.createElement('canvas');
-    mergedCanvas.width = canvas.width;
-    mergedCanvas.height = canvas.height;
-    const mergedCtx = mergedCanvas.getContext('2d')!;
-    mergedCtx.drawImage(canvas, 0, 0);
-    mergedCtx.drawImage(maskCanvas, 0, 0);
-    const maskedDataUrl = mergedCanvas.toDataURL('image/png');
+    // Create black & white mask: black = keep, white = edit area
+    const bwMaskCanvas = document.createElement('canvas');
+    bwMaskCanvas.width = maskCanvas.width;
+    bwMaskCanvas.height = maskCanvas.height;
+    const bwCtx = bwMaskCanvas.getContext('2d')!;
+
+    // Fill with black (keep area)
+    bwCtx.fillStyle = '#000000';
+    bwCtx.fillRect(0, 0, bwMaskCanvas.width, bwMaskCanvas.height);
+
+    // Read the mask canvas pixels and convert painted areas to white
+    const maskCtx = maskCanvas.getContext('2d')!;
+    const maskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+    const bwData = bwCtx.getImageData(0, 0, bwMaskCanvas.width, bwMaskCanvas.height);
+
+    for (let i = 0; i < maskData.data.length; i += 4) {
+      // If alpha > 0 (any painted area), make it white
+      if (maskData.data[i + 3] > 10) {
+        bwData.data[i] = 255;     // R
+        bwData.data[i + 1] = 255; // G
+        bwData.data[i + 2] = 255; // B
+        bwData.data[i + 3] = 255; // A
+      }
+    }
+    bwCtx.putImageData(bwData, 0, 0);
+    const maskedDataUrl = bwMaskCanvas.toDataURL('image/png');
 
     onApply(description, originalDataUrl, maskedDataUrl, referenceImage || undefined);
   };
@@ -200,7 +218,7 @@ const InpaintModal: React.FC<InpaintModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div
         className="bg-white rounded-xl w-[540px] max-h-[90vh] overflow-hidden shadow-2xl border border-gray-200 flex flex-col"
         onClick={e => e.stopPropagation()}

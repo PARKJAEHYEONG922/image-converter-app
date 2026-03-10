@@ -159,16 +159,16 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     return model === 'gemini-3.1-flash-image-preview' ? 14 : 3;
   };
 
-  const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
+  const addImageFiles = useCallback((files: File[]) => {
     const maxImages = getMaxImages();
+    if (maxImages === 0 || files.length === 0) return;
 
-    if (maxImages === 0) return;
-    if (files.length === 0) return;
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
 
     // 슬롯이 꽉 찬 경우: FIFO 교체
     if (selectedImages.length >= maxImages) {
-      const newFiles = files.slice(0, files.length);
+      const newFiles = imageFiles.slice(0, imageFiles.length);
       const removeCount = Math.min(newFiles.length, selectedImages.length);
       const remainingImages = selectedImages.slice(removeCount);
       const remainingPreviews = imagePreviews.slice(removeCount);
@@ -190,13 +190,12 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
         reader.readAsDataURL(file);
       });
       setError(null);
-      event.target.value = '';
       return;
     }
 
     // 슬롯에 여유 있는 경우: 추가 모드
     const remainingSlots = maxImages - selectedImages.length;
-    const newFiles = files.slice(0, remainingSlots);
+    const newFiles = imageFiles.slice(0, remainingSlots);
     const updatedFiles = [...selectedImages, ...newFiles];
 
     setSelectedImages(updatedFiles);
@@ -209,9 +208,36 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       };
       reader.readAsDataURL(file);
     });
-
-    event.target.value = '';
   }, [selectedImages, imagePreviews, mode]);
+
+  const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    addImageFiles(files);
+    event.target.value = '';
+  }, [addImageFiles]);
+
+  // 드래그앤드롭 상태
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    addImageFiles(files);
+  }, [addImageFiles]);
+
+  const handleFileDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleFileDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
 
   const handleRemoveImage = useCallback((index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
@@ -395,6 +421,40 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     setTransformedImages([]);
     setError(null);
   }, []);
+
+  // 이미지 회전/반전 처리 함수
+  const transformResultImage = useCallback((type: 'flipH' | 'flipV' | 'rotateCW') => {
+    const src = imageModal.imageUrl;
+    if (!src) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const isRotate = type === 'rotateCW';
+      const canvas = document.createElement('canvas');
+      canvas.width = isRotate ? img.height : img.width;
+      canvas.height = isRotate ? img.width : img.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.save();
+      if (type === 'flipH') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      } else if (type === 'flipV') {
+        ctx.translate(0, canvas.height);
+        ctx.scale(1, -1);
+      } else {
+        ctx.translate(canvas.width, 0);
+        ctx.rotate(Math.PI / 2);
+      }
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+      const newUrl = canvas.toDataURL('image/png');
+      // Replace in transformed images
+      setTransformedImages(prev => prev.map(u => u === src ? newUrl : u));
+      setImageHistory(prev => prev.map(set => set.map(u => u === src ? newUrl : u)));
+      setImageModal(prev => ({ ...prev, imageUrl: newUrl }));
+    };
+    img.src = src;
+  }, [imageModal.imageUrl]);
 
   // 크롭 완료 처리 함수
   const handleCompleteCrop = useCallback(() => {
@@ -627,18 +687,27 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                     className="hidden"
                     id="image-upload"
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <label
-                      htmlFor="image-upload"
-                      className="flex items-center justify-center h-14 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <span className="text-gray-500 text-sm">🖼️ 이미지 선택</span>
-                    </label>
+                  <label
+                    htmlFor="image-upload"
+                    onDrop={handleFileDrop}
+                    onDragOver={handleFileDragOver}
+                    onDragLeave={handleFileDragLeave}
+                    className={`flex items-center justify-center h-16 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                      isDragOver
+                        ? 'border-blue-400 bg-blue-50'
+                        : 'border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+                    }`}
+                  >
+                    <span className={`text-sm ${isDragOver ? 'text-blue-500 font-medium' : 'text-gray-400'}`}>
+                      {isDragOver ? '여기에 놓으세요' : '여기로 드래그하거나 클릭하여 이미지 선택'}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 gap-2">
                     <button
                       onClick={() => setPasteDialogOpen(true)}
-                      className="h-14 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
+                      className="h-10 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
                     >
-                      <span className="text-gray-500 text-sm">📋 붙여넣기</span>
+                      <span className="text-gray-500 text-xs">📋 클립보드에서 붙여넣기</span>
                     </button>
                   </div>
 
@@ -1171,7 +1240,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
               : (refImage
                 ? 'Replace the highlighted area with what is shown in the reference image, naturally blending it into the scene.'
                 : 'Naturally remove or clean up the highlighted area, filling it seamlessly with the surrounding context.');
-            const fullPrompt = `The first image is the original. The second image is the same image with yellow-green highlighted areas marking the regions to edit. ${userPrompt}. Only modify the highlighted/marked areas and keep everything else identical.${refImage ? ' Use the third reference image as visual guidance for what to place in the marked area.' : ''}`;
+            const fullPrompt = `The first image is the original photo. The second image is a black-and-white mask where WHITE areas indicate the regions to edit and BLACK areas must remain unchanged. ${userPrompt}. ONLY modify the white masked regions. Keep all black masked areas exactly as they are in the original.${refImage ? ' The third image is a reference — use it as visual guidance for what to place in the masked area.' : ''}`;
             const result = await generateImage(fullPrompt, {
               aspectRatio,
               referenceImages
@@ -1306,6 +1375,24 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                     className="bg-purple-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-purple-700"
                   >
                     ✂️ 자르기
+                  </button>
+                  <button
+                    onClick={() => transformResultImage('flipH')}
+                    className="bg-gray-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-gray-700"
+                  >
+                    ⇔ 좌우
+                  </button>
+                  <button
+                    onClick={() => transformResultImage('flipV')}
+                    className="bg-gray-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-gray-700"
+                  >
+                    ⇕ 상하
+                  </button>
+                  <button
+                    onClick={() => transformResultImage('rotateCW')}
+                    className="bg-gray-600 text-white border-none rounded-lg px-4 py-2 text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-gray-700"
+                  >
+                    ↻ 회전
                   </button>
                   <button
                     onClick={async () => {
