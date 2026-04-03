@@ -846,7 +846,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                         <div className="px-3 py-1.5 text-xs text-gray-400 font-medium">Aspect ratio</div>
                         {(getCurrentModel() === 'gemini-3.1-flash-image-preview'
                           ? ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '1:4', '4:1', '1:8', '8:1'] as AspectRatio[]
-                          : ['1:1', '3:4', '4:3', '9:16', '16:9', '21:9'] as AspectRatio[]
+                          : ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'] as AspectRatio[]
                         ).map((ratio) => {
                           const [w, h] = ratio.split(':').map(Number);
                           const isWide = w > h;
@@ -1357,10 +1357,19 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                     {([
                       { label: '자유', value: undefined },
                       { label: '1:1', value: 1 },
-                      { label: '4:3', value: 4 / 3 },
+                      { label: '2:3', value: 2 / 3 },
+                      { label: '3:2', value: 3 / 2 },
                       { label: '3:4', value: 3 / 4 },
-                      { label: '16:9', value: 16 / 9 },
+                      { label: '4:3', value: 4 / 3 },
+                      { label: '4:5', value: 4 / 5 },
+                      { label: '5:4', value: 5 / 4 },
                       { label: '9:16', value: 9 / 16 },
+                      { label: '16:9', value: 16 / 9 },
+                      { label: '21:9', value: 21 / 9 },
+                      { label: '1:4', value: 1 / 4 },
+                      { label: '4:1', value: 4 },
+                      { label: '1:8', value: 1 / 8 },
+                      { label: '8:1', value: 8 },
                     ] as { label: string; value: number | undefined }[]).map((preset) => (
                       <button
                         key={preset.label}
