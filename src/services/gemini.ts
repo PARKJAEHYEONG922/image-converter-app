@@ -107,8 +107,10 @@ export const generateImage = async (
         text: enhancedPrompt
       });
 
-      // generationConfig 구성
-      const generationConfig: any = {};
+      // generationConfig 구성 — TEXT+IMAGE 모두 요청해야 이미지가 반환됨
+      const generationConfig: any = {
+        responseModalities: ['TEXT', 'IMAGE']
+      };
 
       // imageConfig 구성
       const imageConfig: any = {};
@@ -119,8 +121,9 @@ export const generateImage = async (
         console.log(`📐 Aspect Ratio 설정: ${options.aspectRatio}`);
       }
 
-      // 해상도 설정: overrideResolution 우선, 없으면 현재 설정 사용
-      if (useModel === 'gemini-3.1-flash-image-preview') {
+      // 해상도 설정: 3.1 Flash 및 Pro 모델 지원
+      const supportsImageSize = useModel === 'gemini-3.1-flash-image-preview' || useModel === 'gemini-3-pro-image-preview';
+      if (supportsImageSize) {
         const sizeMap: Record<string, string> = { '0.5k': '0.5K', '1k': '1K', '2k': '2K', '4k': '4K' };
         if (options?.overrideResolution) {
           imageConfig.imageSize = options.overrideResolution;
@@ -136,19 +139,17 @@ export const generateImage = async (
         generationConfig.imageConfig = imageConfig;
       }
 
-      // Gemini 2.5 Flash Image Preview 모델 사용
       const requestBody: any = {
         contents: [{
           parts: parts
-        }]
+        }],
+        generationConfig
       };
 
-      // generationConfig가 비어있지 않으면 추가
-      if (Object.keys(generationConfig).length > 0) {
-        requestBody.generationConfig = generationConfig;
-      }
-
       const apiKey = (genAI as any).apiKey;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${useModel}:generateContent?key=${apiKey}`,
         {
@@ -156,9 +157,11 @@ export const generateImage = async (
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
         }
       );
+      clearTimeout(timeout);
 
       console.log(`📊 Gemini 응답 상태: ${response.status}`);
 
@@ -178,24 +181,24 @@ export const generateImage = async (
       const data = await response.json();
       console.log(`✅ Gemini 응답 수신 완료`);
 
-      // Gemini 2.5 Flash Image의 실제 응답 구조에 따른 이미지 데이터 추출
+      // Gemini 응답에서 이미지 데이터 추출
       const responseParts = data.candidates?.[0]?.content?.parts;
-      let imageData = null;
+      let imageData: string | null = null;
+      let imageMimeType = 'image/jpeg';
 
       if (responseParts && Array.isArray(responseParts)) {
-        // parts 배열에서 inlineData가 있는 요소 찾기
         for (const part of responseParts) {
           if (part.inlineData && part.inlineData.data) {
             imageData = part.inlineData.data;
+            imageMimeType = part.inlineData.mimeType || 'image/jpeg';
             break;
           }
         }
       }
 
       if (imageData) {
-        console.log('✅ Gemini 이미지 데이터 추출 성공');
-        // Base64 데이터를 data URL로 변환
-        return `data:image/png;base64,${imageData}`;
+        console.log(`✅ Gemini 이미지 데이터 추출 성공 (${imageMimeType})`);
+        return `data:${imageMimeType};base64,${imageData}`;
       } else {
         console.error('Gemini 응답에서 이미지 데이터를 찾을 수 없음');
 

@@ -24,8 +24,14 @@ const GEMINI_MODELS: GeminiModelInfo[] = [
   {
     id: 'gemini-3.1-flash-image-preview',
     name: 'Gemini 3.1 Flash Image',
-    description: '최신 모델 - 고효율, 확장된 비율 지원, 고급 이미지 생성',
+    description: '고효율 - 확장된 비율 지원, 최대 4K 해상도',
     tier: 'flash'
+  },
+  {
+    id: 'gemini-3-pro-image-preview',
+    name: 'Gemini 3 Pro Image',
+    description: '최고품질 - 고급 추론, 텍스트 렌더링 정확도 94%',
+    tier: 'pro'
   }
 ];
 
@@ -151,10 +157,10 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
             <div className="flex items-center gap-1.5">
               <span className="text-gray-400">모델</span>
               <span className="font-medium text-gray-700">
-                {selectedModel === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
+                {selectedModel === 'gemini-3-pro-image-preview' ? '3 Pro' : selectedModel === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
               </span>
             </div>
-            {selectedModel === 'gemini-3.1-flash-image-preview' && (
+            {(selectedModel === 'gemini-3.1-flash-image-preview' || selectedModel === 'gemini-3-pro-image-preview') && (
               <>
                 <div className="h-3 w-px bg-gray-200" />
                 <div className="flex items-center gap-1.5">
@@ -191,7 +197,7 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
                       : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  {model.id === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
+                  {model.id === 'gemini-3-pro-image-preview' ? '3 Pro' : model.id === 'gemini-3.1-flash-image-preview' ? '3.1 Flash' : '2.5 Flash'}
                 </button>
               ))}
             </div>
@@ -200,12 +206,15 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
             </p>
           </div>
 
-          {/* Resolution (3.1 Flash only) */}
-          {selectedModel === 'gemini-3.1-flash-image-preview' && (
+          {/* Resolution (3.1 Flash / Pro only) */}
+          {(selectedModel === 'gemini-3.1-flash-image-preview' || selectedModel === 'gemini-3-pro-image-preview') && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">출력 해상도</label>
               <div className="flex gap-1.5">
-                {(['0.5k', '1k', '2k', '4k'] as OutputResolution[]).map((res) => (
+                {(selectedModel === 'gemini-3.1-flash-image-preview'
+                  ? ['0.5k', '1k', '2k', '4k'] as OutputResolution[]
+                  : ['1k', '2k', '4k'] as OutputResolution[]
+                ).map((res) => (
                   <button
                     key={res}
                     onClick={() => setOutputResolution(res)}
@@ -258,11 +267,27 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
           )}
 
           {/* Cost Info */}
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <p className="text-xs font-medium text-gray-600 mb-1.5">비용 정보</p>
-            <div className="text-xs text-gray-500 space-y-0.5">
-              <div>이미지 1장당 약 $0.039 (1290 토큰)</div>
-              <div>GCP 신규 가입 시 $300 크레딧 = 약 7,600장 생성 가능</div>
+          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-2">
+            <p className="text-xs font-medium text-gray-600">이미지 생성 비용 (1장당)</p>
+            <div className="space-y-1">
+              <div className={`flex items-center justify-between text-xs rounded-md px-2 py-1.5 ${selectedModel === 'gemini-2.5-flash-image' ? 'bg-blue-50 text-blue-800' : 'text-gray-500'}`}>
+                <span className="font-medium">2.5 Flash</span>
+                <span>$0.039 <span className="opacity-60">≈ 55원</span></span>
+              </div>
+              <div className={`flex items-start justify-between text-xs rounded-md px-2 py-1.5 ${selectedModel === 'gemini-3.1-flash-image-preview' ? 'bg-blue-50 text-blue-800' : 'text-gray-500'}`}>
+                <span className="font-medium">3.1 Flash</span>
+                <div className="text-right space-y-0.5">
+                  <div>1K <span className="font-medium">$0.067</span> · 2K <span className="font-medium">$0.101</span> · 4K <span className="font-medium">$0.151</span></div>
+                  <div className="opacity-60">≈ 94원 · 141원 · 211원</div>
+                </div>
+              </div>
+              <div className={`flex items-start justify-between text-xs rounded-md px-2 py-1.5 ${selectedModel === 'gemini-3-pro-image-preview' ? 'bg-blue-50 text-blue-800' : 'text-gray-500'}`}>
+                <span className="font-medium">3 Pro</span>
+                <div className="text-right space-y-0.5">
+                  <div>1K/2K <span className="font-medium">$0.134</span> · 4K <span className="font-medium">$0.240</span></div>
+                  <div className="opacity-60">≈ 188원 · 336원</div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -283,23 +308,6 @@ const ApiSettings: React.FC<ApiSettingsProps> = ({ isOpen, onClose }) => {
 
             {isGuideOpen && (
               <div className="px-4 pb-4 space-y-3">
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-                  <p className="text-xs font-medium text-blue-700 mb-1">GCP $300 무료 크레딧 (추천)</p>
-                  <div className="text-xs text-blue-600 space-y-0.5">
-                    <div>신규 가입 시 $300 크레딧 (90일)</div>
-                    <div>
-                      <a
-                        href="#"
-                        className="underline hover:text-blue-800"
-                        onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://cloud.google.com/free'); }}
-                      >
-                        GCP 가입
-                      </a>
-                      {' '}후 AI Studio에서 Billing 연결
-                    </div>
-                  </div>
-                </div>
-
                 <ol className="list-decimal list-inside space-y-1.5 text-xs text-gray-500">
                   <li>
                     <a

@@ -168,8 +168,8 @@ ipcMain.handle('save-image', async (_, imageData, filename) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: filename,
     filters: [
-      { name: 'PNG Image', extensions: ['png'] },
       { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+      { name: 'PNG Image', extensions: ['png'] },
       { name: 'WebP Image', extensions: ['webp'] }
     ]
   });
@@ -206,7 +206,6 @@ ipcMain.handle('save-api-settings', async (_, settings) => {
   return true;
 });
 
-// Open external URLs
 ipcMain.handle('open-external', async (_, url) => {
   await shell.openExternal(url);
   return true;

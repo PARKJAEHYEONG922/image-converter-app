@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getApiSettings: () => ipcRenderer.invoke('get-api-settings'),
   saveApiSettings: (settings: any) => ipcRenderer.invoke('save-api-settings', settings),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
-  downloadImage: (imageUrl: string) => ipcRenderer.invoke('download-image', imageUrl)
+  downloadImage: (imageUrl: string) => ipcRenderer.invoke('download-image', imageUrl),
 });
 
 export type ElectronAPI = {
@@ -18,4 +18,6 @@ export type ElectronAPI = {
   showItemInFolder: (filePath: string) => Promise<void>;
   getApiSettings: () => Promise<any>;
   saveApiSettings: (settings: any) => Promise<boolean>;
+  openExternal: (url: string) => Promise<boolean>;
+  downloadImage: (imageUrl: string) => Promise<string>;
 };

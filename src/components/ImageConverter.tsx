@@ -1,5 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import Button from './Button';
+import React, { useState, useCallback, useRef } from 'react';
 import ImagePasteDialog from './ImagePasteDialog';
 import ImageMarkupModal from './ImageMarkupModal';
 import SaveSuccessDialog from './SaveSuccessDialog';
@@ -7,71 +6,27 @@ import ColorTransferModal from './ColorTransferModal';
 import RelightModal from './RelightModal';
 import InpaintModal from './InpaintModal';
 import AnglesModal from './AnglesModal';
-import BackgroundRemoval from './BackgroundRemoval';
 import { generateImage, getCurrentModel, setGeminiModel, getCurrentResolution, setOutputResolution } from '../services/gemini';
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
-type ImageMode = 'text-to-image' | 'edit-image' | 'background-removal';
 type AspectRatio = '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '4:5' | '5:4' | '9:16' | '16:9' | '21:9' | '1:4' | '4:1' | '1:8' | '8:1';
-
-interface ModeState {
-  selectedImages: File[];
-  imagePreviews: string[];
-  prompt: string;
-  aspectRatio: AspectRatio;
-  imageCount: number;
-  transformedImages: string[];
-  imageHistory: string[][];
-}
 
 interface ImageConverterProps {
   onSettingsOpen?: () => void;
 }
 
 const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
-  const [mode, setMode] = useState<ImageMode>('text-to-image');
   const [activeModel, setActiveModel] = useState(getCurrentModel());
   const [activeResolution, setActiveResolution] = useState(getCurrentResolution());
 
-  const [modeStates, setModeStates] = useState<Record<ImageMode, ModeState>>({
-    'text-to-image': {
-      selectedImages: [],
-      imagePreviews: [],
-      prompt: '',
-      aspectRatio: '1:1',
-      imageCount: 1,
-      transformedImages: [],
-      imageHistory: []
-    },
-    'edit-image': {
-      selectedImages: [],
-      imagePreviews: [],
-      prompt: '',
-      aspectRatio: '1:1',
-      imageCount: 1,
-      transformedImages: [],
-      imageHistory: []
-    },
-    'background-removal': {
-      selectedImages: [],
-      imagePreviews: [],
-      prompt: '',
-      aspectRatio: '1:1',
-      imageCount: 1,
-      transformedImages: [],
-      imageHistory: []
-    }
-  });
-
-  const currentState = modeStates[mode];
-  const [selectedImages, setSelectedImages] = useState<File[]>(currentState.selectedImages);
-  const [imagePreviews, setImagePreviews] = useState<string[]>(currentState.imagePreviews);
-  const [prompt, setPrompt] = useState(currentState.prompt);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(currentState.aspectRatio);
-  const [imageCount, setImageCount] = useState(currentState.imageCount);
-  const [transformedImages, setTransformedImages] = useState<string[]>(currentState.transformedImages);
-  const [imageHistory, setImageHistory] = useState<string[][]>(currentState.imageHistory);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [prompt, setPrompt] = useState('');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+  const [imageCount, setImageCount] = useState(1);
+  const [transformedImages, setTransformedImages] = useState<string[]>([]);
+  const [imageHistory, setImageHistory] = useState<string[][]>([]);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
 
   const [isRatioOpen, setIsRatioOpen] = useState(false);
@@ -154,15 +109,13 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const imgRef = useRef<HTMLImageElement>(null);
 
   const getMaxImages = () => {
-    if (mode === 'text-to-image') return 0;
     const model = getCurrentModel();
-    // 3.1 Flash: 최대 14장, 2.5 Flash: 최대 3장 (공식 문서 기준)
-    return model === 'gemini-3.1-flash-image-preview' ? 14 : 3;
+    return (model === 'gemini-3.1-flash-image-preview' || model === 'gemini-3-pro-image-preview') ? 14 : 3;
   };
 
   const addImageFiles = useCallback((files: File[]) => {
     const maxImages = getMaxImages();
-    if (maxImages === 0 || files.length === 0) return;
+    if (files.length === 0) return;
 
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
@@ -209,7 +162,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
       };
       reader.readAsDataURL(file);
     });
-  }, [selectedImages, imagePreviews, mode]);
+  }, [selectedImages, imagePreviews, ]);
 
   const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -258,8 +211,6 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   const handleImageFromDialog = useCallback(async (imageData: string | File) => {
     const maxImages = getMaxImages();
 
-    if (maxImages === 0) return;
-
     const isFull = selectedImages.length >= maxImages;
 
     // 이미지 추가/교체 헬퍼 함수
@@ -299,7 +250,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
         setError('이미지 URL에서 이미지를 가져올 수 없습니다. 일부 사이트는 외부 접근을 제한합니다.');
       }
     }
-  }, [selectedImages, imagePreviews, mode]);
+  }, [selectedImages, imagePreviews, ]);
 
   const fileToDataUrl = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -311,11 +262,6 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
   };
 
   const handleTransform = useCallback(async () => {
-    if (mode !== 'text-to-image' && selectedImages.length === 0) {
-      setError('이미지를 선택해주세요.');
-      return;
-    }
-
     if (!prompt.trim()) {
       setError('프롬프트를 입력해주세요.');
       return;
@@ -327,7 +273,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     try {
       // Build options once
       const imageOptions: any = { aspectRatio };
-      if (mode !== 'text-to-image') {
+      if (selectedImages.length > 0) {
         if (selectedImages.length > 1) {
           const imageDataUrls = await Promise.all(
             selectedImages.map(file => fileToDataUrl(file))
@@ -344,28 +290,40 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
         finalPrompt += `\n\nApply the following color palette/mood to this image: ${colorPalette.join(', ')}. Use these colors as the dominant tones and color grading for the output.`;
       }
 
-      // Send N parallel requests
-      let lastError: any = null;
-      const promises = Array.from({ length: imageCount }, () =>
-        generateImage(finalPrompt, { ...imageOptions }).catch((err) => {
-          console.error('개별 이미지 생성 실패:', err);
-          lastError = err;
-          return null;
-        })
-      );
-      const results = await Promise.all(promises);
-      const successImages = results.filter((url): url is string => url !== null && url !== '');
+      // Save current results to history before overwriting
+      if (transformedImages.length > 0) {
+        setImageHistory(prev => [transformedImages, ...prev]);
+      }
+      setTransformedImages([]);
 
-      if (successImages.length > 0) {
-        if (transformedImages.length > 0) {
-          setImageHistory(prev => [transformedImages, ...prev]);
-        }
-        setTransformedImages(successImages);
-        setSelectedResultIndex(0);
-      } else if (lastError) {
-        throw lastError;
-      } else {
-        setError('이미지 생성/변환에 실패했습니다.');
+      // Send N parallel requests — show each image as it arrives
+      let lastError: any = null;
+      const resultsArray: (string | null)[] = new Array(imageCount).fill(null);
+      let firstShown = false;
+
+      const promises = Array.from({ length: imageCount }, (_, i) =>
+        generateImage(finalPrompt, { ...imageOptions })
+          .then((url) => {
+            resultsArray[i] = url;
+            const soFar = resultsArray.filter((r): r is string => r !== null && r !== '');
+            if (soFar.length > 0) {
+              setTransformedImages(soFar);
+              if (!firstShown) { setSelectedResultIndex(0); firstShown = true; }
+            }
+            return url;
+          })
+          .catch((err) => {
+            console.error('개별 이미지 생성 실패:', err);
+            lastError = err;
+            return null;
+          })
+      );
+      await Promise.all(promises);
+
+      const successImages = resultsArray.filter((r): r is string => r !== null && r !== '');
+      if (successImages.length === 0) {
+        if (lastError) throw lastError;
+        else setError('이미지 생성/변환에 실패했습니다.');
       }
     } catch (err) {
       console.error('이미지 처리 오류:', err);
@@ -373,7 +331,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     } finally {
       setIsTransforming(false);
     }
-  }, [mode, selectedImages, prompt, aspectRatio, imageCount, transformedImages, colorPalette]);
+  }, [selectedImages, prompt, aspectRatio, imageCount, transformedImages, colorPalette]);
 
   const openImageModal = useCallback((imageUrl: string) => {
     setImageModal({
@@ -503,138 +461,100 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
     setCropAspect(undefined);
   }, [completedCrop, transformedImages]);
 
-  useEffect(() => {
-    const savePreviousModeState = () => {
-      setModeStates(prev => ({
-        ...prev,
-        [mode]: {
-          selectedImages,
-          imagePreviews,
-          prompt,
-          aspectRatio,
-          imageCount,
-          transformedImages,
-          imageHistory
-        }
-      }));
-    };
-
-    return savePreviousModeState;
-  }, [mode, selectedImages, imagePreviews, prompt, aspectRatio, imageCount, transformedImages, imageHistory]);
-
-  useEffect(() => {
-    const newState = modeStates[mode];
-    setSelectedImages(newState.selectedImages);
-    setImagePreviews(newState.imagePreviews);
-    setPrompt(newState.prompt);
-    setAspectRatio(newState.aspectRatio);
-    setImageCount(newState.imageCount);
-    setTransformedImages(newState.transformedImages);
-    setImageHistory(newState.imageHistory);
-    setError(null);
-  }, [mode]);
-
   const getModeDescription = () => {
-    switch (mode) {
-      case 'text-to-image':
-        return '텍스트 설명으로 새로운 이미지를 생성합니다';
-      case 'edit-image':
-        return '이미지 편집, 합성, 스타일 전송 등 자유롭게 활용하세요';
-      case 'background-removal':
-        return 'AI로 배경을 자동으로 제거합니다';
-      default:
-        return '';
-    }
+    if (selectedImages.length > 0) return '이미지 편집, 합성, 스타일 전환 등 자유롭게 활용하세요';
+    return '텍스트로 이미지를 생성하거나, 위에 이미지를 추가하면 편집 모드로 전환됩니다';
   };
 
   const getPromptExamples = () => {
-    switch (mode) {
-      case 'text-to-image':
-        return [
-          '우주에서 떠다니는 고양이',
-          '산 위에 있는 현대적인 집',
-          '미래 도시의 야경',
-          '수채화 스타일의 숲'
-        ];
-      case 'edit-image':
-        return [
-          '배경을 우주로 변경',
-          '이 이미지를 수채화 스타일로 변환',
-          '1번 이미지의 사람을 2번 이미지의 배경에 배치',
-          '사람 제거하고 배경만 남겨줘'
-        ];
-      case 'background-removal':
-        return [];
-      default:
-        return [];
-    }
+    if (selectedImages.length > 0) return [
+      '배경을 우주로 변경',
+      '수채화 스타일로 변환',
+      '사람 제거하고 배경만 남겨줘',
+      '1번 이미지의 사람을 2번 배경에 배치'
+    ];
+    return [
+      '우주에서 떠다니는 고양이',
+      '산 위에 있는 현대적인 집',
+      '미래 도시의 야경',
+      '수채화 스타일의 숲'
+    ];
   };
 
   const maxImages = getMaxImages();
 
   return (
-    <div className="flex flex-col h-full bg-gray-100">
-      <div className="bg-white border-b border-gray-200 px-6 py-3 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-              {[
-                { id: 'text-to-image' as ImageMode, label: '✨ 생성' },
-                { id: 'edit-image' as ImageMode, label: '✏️ 편집' },
-                { id: 'background-removal' as ImageMode, label: '✂️ 누끼' }
-              ].map((modeOption) => (
+    <div className="flex flex-col h-full bg-gray-50">
+      <div className="bg-white border-b border-gray-100 px-5 shadow-sm">
+        <div className="flex items-center justify-between h-14">
+          {/* 왼쪽: 로고 */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 bg-gradient-to-br from-violet-500 to-purple-600 rounded-lg flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <span className="text-sm font-bold text-gray-800 tracking-tight">AI Studio</span>
+          </div>
+
+          {/* 오른쪽: 모델 + 설정 */}
+          <div className="flex items-center gap-2">
+            {/* 모델 선택 */}
+            <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-1">
                 <button
-                  key={modeOption.id}
-                  onClick={() => setMode(modeOption.id)}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    mode === modeOption.id
-                      ? 'bg-white text-blue-700 shadow-sm'
+                  onClick={async () => {
+                    setGeminiModel('gemini-2.5-flash-image');
+                    setActiveModel('gemini-2.5-flash-image');
+                    const settings = await window.electronAPI.getApiSettings();
+                    window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-2.5-flash-image' });
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    activeModel === 'gemini-2.5-flash-image'
+                      ? 'bg-white text-gray-900 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {modeOption.label}
+                  2.5 Flash
                 </button>
-              ))}
+                <button
+                  onClick={async () => {
+                    setGeminiModel('gemini-3.1-flash-image-preview');
+                    setActiveModel('gemini-3.1-flash-image-preview');
+                    const settings = await window.electronAPI.getApiSettings();
+                    window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-3.1-flash-image-preview' });
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    activeModel === 'gemini-3.1-flash-image-preview'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  3.1 Flash
+                </button>
+                <button
+                  onClick={async () => {
+                    setGeminiModel('gemini-3-pro-image-preview');
+                    setActiveModel('gemini-3-pro-image-preview');
+                    const settings = await window.electronAPI.getApiSettings();
+                    window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-3-pro-image-preview' });
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    activeModel === 'gemini-3-pro-image-preview'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  3 Pro
+                </button>
             </div>
-            <span className="text-xs text-gray-400">{getModeDescription()}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* 모델 스위치 */}
-            <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={async () => {
-                  setGeminiModel('gemini-2.5-flash-image');
-                  setActiveModel('gemini-2.5-flash-image');
-                  const settings = await window.electronAPI.getApiSettings();
-                  window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-2.5-flash-image' });
-                }}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                  activeModel === 'gemini-2.5-flash-image'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                2.5 Flash
-              </button>
-              <button
-                onClick={async () => {
-                  setGeminiModel('gemini-3.1-flash-image-preview');
-                  setActiveModel('gemini-3.1-flash-image-preview');
-                  const settings = await window.electronAPI.getApiSettings();
-                  window.electronAPI.saveApiSettings({ ...settings, geminiModel: 'gemini-3.1-flash-image-preview' });
-                }}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                  activeModel === 'gemini-3.1-flash-image-preview'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                3.1 Flash
-              </button>
-            </div>
-            {activeModel === 'gemini-3.1-flash-image-preview' && (
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                {(['0.5k', '1k', '2k', '4k'] as const).map((res) => (
+
+            {/* 해상도 (3.1 Flash / Pro) */}
+            {(activeModel === 'gemini-3.1-flash-image-preview' || activeModel === 'gemini-3-pro-image-preview') && (
+              <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-1">
+                {(activeModel === 'gemini-3.1-flash-image-preview'
+                  ? ['0.5k', '1k', '2k', '4k'] as const
+                  : ['1k', '2k', '4k'] as const
+                ).map((res) => (
                   <button
                     key={res}
                     onClick={async () => {
@@ -654,33 +574,34 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                 ))}
               </div>
             )}
+
             {onSettingsOpen && (
               <button
                 onClick={onSettingsOpen}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                title="API 설정"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
                 </svg>
+                설정
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {mode === 'background-removal' ? (
-        <BackgroundRemoval />
-      ) : (
       <div className="flex-1 overflow-y-auto p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-full">
           <div className="space-y-4">
-            {mode !== 'text-to-image' && (
-              <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+            <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-gray-100">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-800">📤 이미지 업로드 {maxImages > 0 && <span className="text-gray-400 font-normal">({selectedImages.length}/{maxImages})</span>}</h2>
+                  <h2 className="text-sm font-semibold text-gray-700">이미지 업로드
+                    {maxImages > 0 && <span className="ml-1.5 text-xs font-normal text-gray-400">{selectedImages.length}/{maxImages}</span>}
+                  </h2>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <input
                     type="file"
                     accept="image/*"
@@ -694,24 +615,32 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                     onDrop={handleFileDrop}
                     onDragOver={handleFileDragOver}
                     onDragLeave={handleFileDragLeave}
-                    className={`flex items-center justify-center h-16 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                    className={`flex flex-col items-center justify-center h-20 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
                       isDragOver
-                        ? 'border-blue-400 bg-blue-50'
-                        : 'border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+                        ? 'border-violet-400 bg-violet-50'
+                        : 'border-gray-200 hover:border-violet-300 hover:bg-gray-50'
                     }`}
                   >
-                    <span className={`text-sm ${isDragOver ? 'text-blue-500 font-medium' : 'text-gray-400'}`}>
-                      {isDragOver ? '여기에 놓으세요' : '여기로 드래그하거나 클릭하여 이미지 선택'}
-                    </span>
+                    {isDragOver ? (
+                      <span className="text-sm text-violet-500 font-medium">여기에 놓으세요</span>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5 text-gray-300 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span className="text-xs text-gray-400">드래그하거나 클릭하여 이미지 선택</span>
+                      </>
+                    )}
                   </label>
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      onClick={() => setPasteDialogOpen(true)}
-                      className="h-10 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
-                    >
-                      <span className="text-gray-500 text-xs">📋 클립보드에서 붙여넣기</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setPasteDialogOpen(true)}
+                    className="w-full h-9 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5 text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    클립보드에서 붙여넣기
+                  </button>
 
                   {imagePreviews.length > 0 && (() => {
                     const cols = imagePreviews.length === 1 ? 1 : imagePreviews.length === 2 ? 2 : imagePreviews.length <= 4 ? 3 : 4;
@@ -788,29 +717,30 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                   })()}
                 </div>
               </div>
-            )}
 
-            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-              <h2 className="text-sm font-semibold text-gray-800 mb-2">💬 프롬프트</h2>
+            <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-gray-100">
+              <h2 className="text-sm font-semibold text-gray-700 mb-2.5">프롬프트</h2>
 
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={getModeDescription()}
-                className="w-full h-24 px-3 py-2 border border-gray-200 rounded-lg resize-none focus:border-gray-400 focus:ring-1 focus:ring-gray-200 transition-all text-sm"
+                className="w-full h-28 px-3.5 py-3 bg-gray-50 border border-gray-200 rounded-xl resize-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100 focus:bg-white transition-all text-sm text-gray-800 placeholder-gray-400 outline-none"
               />
 
-              <div className="mt-2 flex flex-wrap gap-1">
-                {getPromptExamples().slice(0, 4).map((example) => (
-                  <button
-                    key={example}
-                    onClick={() => setPrompt(example)}
-                    className="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs rounded-md hover:bg-blue-100 transition-colors"
-                  >
-                    {example}
-                  </button>
-                ))}
-              </div>
+              {getPromptExamples().length > 0 && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {getPromptExamples().slice(0, 4).map((example) => (
+                    <button
+                      key={example}
+                      onClick={() => setPrompt(example)}
+                      className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs rounded-full hover:bg-violet-50 hover:text-violet-600 transition-colors"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
                 <div className="relative">
@@ -937,33 +867,45 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
             </div>
 
             <div className="flex gap-2">
-              <Button
+              <button
                 onClick={handleTransform}
                 disabled={!prompt.trim() || isTransforming}
-                loading={isTransforming}
-                variant="primary"
-                className="flex-1 py-2.5 text-sm"
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-md hover:shadow-lg active:scale-[0.98]"
               >
-                {isTransforming ? '⏳ 처리 중...' : '🎨 생성하기'}
-              </Button>
-              <Button
+                {isTransforming ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    생성 중...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" />
+                    </svg>
+                    생성하기
+                  </>
+                )}
+              </button>
+              <button
                 onClick={handleReset}
                 disabled={isTransforming}
-                variant="secondary"
-                className="px-5 py-2.5 text-sm"
+                className="px-4 py-3 rounded-xl text-sm font-medium text-gray-500 bg-white hover:bg-gray-50 border border-gray-200 transition-all disabled:opacity-50 shadow-sm"
               >
-                🔄 초기화
-              </Button>
+                초기화
+              </button>
             </div>
           </div>
 
           <div className="flex flex-col">
-            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col min-h-[400px] sticky top-0">
+            <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-gray-100 flex flex-col min-h-[400px] sticky top-0">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-gray-800">결과</h2>
+                  <h2 className="text-sm font-semibold text-gray-700">결과</h2>
                   {transformedImages.length > 1 && (
-                    <span className="text-xs text-gray-400">{selectedResultIndex + 1}/{transformedImages.length}장</span>
+                    <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{selectedResultIndex + 1}/{transformedImages.length}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -1020,8 +962,12 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                 )}
 
                 {transformedImages.length === 0 && !error && (
-                  <div className="flex flex-col items-center justify-center flex-1 bg-gray-50 rounded-lg border border-dashed border-gray-200 py-16">
-                    <span className="text-4xl mb-2">🎨</span>
+                  <div className="flex flex-col items-center justify-center flex-1 bg-gray-50 rounded-xl border border-dashed border-gray-200 py-16 gap-3">
+                    <div className="w-14 h-14 bg-gradient-to-br from-violet-100 to-purple-100 rounded-2xl flex items-center justify-center">
+                      <svg className="w-7 h-7 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
                     <p className="text-gray-400 text-sm">프롬프트를 입력하고 생성해보세요</p>
                   </div>
                 )}
@@ -1072,7 +1018,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
 
                       {/* Post-processing actions */}
                       <div className="mt-3 flex justify-center">
-                        <div className="inline-flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                        <div className="inline-flex items-center gap-0.5 bg-gray-100 rounded-xl p-1">
                           {([
                             { id: 'upscale', icon: '↗', label: 'Upscale' },
                             { id: 'enhance', icon: '✦', label: 'Enhance', prompt: 'ONLY modify the skin texture in this image — do NOT change anything else. The composition, pose, face shape, expression, hair, clothing, background, lighting, and colors must remain EXACTLY identical pixel-for-pixel. ONLY apply these changes to skin areas: add realistic skin pores, fine lines, subtle wrinkles, and natural micro-imperfections. Replace the smooth/airbrushed/plastic AI look on skin with authentic photographic skin texture. Add natural skin details like tiny moles, subtle redness variation, and visible pore structure. Every non-skin element must be completely untouched.' },
@@ -1127,7 +1073,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                                   setIsTransforming(false);
                                 }
                               }}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-white hover:shadow-sm transition-all disabled:opacity-40"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-white hover:shadow-sm hover:text-violet-600 transition-all disabled:opacity-40"
                             >
                               <span className="text-sm">{action.icon}</span>
                               {action.label}
@@ -1147,10 +1093,10 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                 <button
                   onClick={async () => {
                     try {
-                      const filename = `gemini-${mode}-${Date.now()}.png`;
-                      const filePath = await window.electronAPI.saveImage(
-                        transformedImages[selectedResultIndex], filename
-                      );
+                      const imgData = transformedImages[selectedResultIndex];
+                      const ext = imgData.match(/^data:image\/(\w+);/)?.[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+                      const filename = `gemini-image-${Date.now()}.${ext}`;
+                      const filePath = await window.electronAPI.saveImage(imgData, filename);
                       if (filePath) {
                         setSaveDialogState({ isOpen: true, filePath });
                       }
@@ -1158,8 +1104,11 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                       alert('이미지 저장 중 오류가 발생했습니다.');
                     }
                   }}
-                  className="px-6 py-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white hover:bg-gray-100 border border-gray-200 rounded-lg transition-colors shadow-sm"
+                  className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-gray-600 hover:text-gray-800 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl transition-colors shadow-sm"
                 >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
                   저장
                 </button>
               </div>
@@ -1167,7 +1116,6 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
           </div>
         </div>
       </div>
-      )}
 
       {/* Image Markup Modal */}
       <ImageMarkupModal
@@ -1309,6 +1257,7 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
         }}
       />
 
+
       {imageModal.isOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-[1000] p-5"
@@ -1438,8 +1387,10 @@ const ImageConverter: React.FC<ImageConverterProps> = ({ onSettingsOpen }) => {
                   <button
                     onClick={async () => {
                       try {
-                        const filename = `gemini-${mode}-${Date.now()}.png`;
-                        const filePath = await window.electronAPI.saveImage(imageModal.imageUrl, filename);
+                        const imgUrl = imageModal.imageUrl;
+                        const ext = imgUrl.match(/^data:image\/(\w+);/)?.[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+                        const filename = `gemini-image-${Date.now()}.${ext}`;
+                        const filePath = await window.electronAPI.saveImage(imgUrl, filename);
 
                         if (filePath) {
                           // Show save success dialog
